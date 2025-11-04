@@ -1,41 +1,78 @@
 # Stage 1: Build PHP dependencies
-FROM composer:2 as vendor
+FROM composer:2.7 as vendor
 WORKDIR /app
-COPY database/ database/
-COPY routes/ routes/
+
+# Copy composer files
 COPY composer.json composer.lock ./
-RUN composer install --no-dev --no-interaction --optimize-autoloader
+
+# Install dependencies
+RUN composer install \
+    --no-dev \
+    --no-interaction \
+    --optimize-autoloader \
+    --ignore-platform-reqs \
+    --no-scripts \
+    --prefer-dist
+
+# -----------------------------------------------
 
 # Stage 2: Build frontend assets
-FROM node:18 as assets
+FROM node:22-alpine as assets
 WORKDIR /app
-COPY package.json package.lock ./
-RUN npm install
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy source files needed for build
 COPY . .
+
+# Build assets
 RUN npm run build
+
+# -----------------------------------------------
 
 # Stage 3: The final production image
 FROM php:8.2-fpm-alpine
-WORKDIR /app
 
-# Install system dependencies (e.g., for Postgres or MySQL)
-# Example for Postgres:
-RUN apk add --no-cache libpq-dev $PHPIZE_DEPS \
-    && pecl install redis \
-    && docker-php-ext-install pdo pdo_pgsql \
-    && docker-php-ext-enable redis pdo pdo_pgsql
+# Set working directory
+WORKDIR /var/www/html
+
+# Clean up build dependencies
+RUN rm -rf /tmp/* /var/cache/apk/*
 
 # Copy built dependencies from other stages
-COPY --from=vendor /app/vendor/ /app/vendor/
-COPY --from=assets /app/public/ /app/public/
+COPY --from=vendor --chown=www-data:www-data /app/vendor/ /var/www/html/vendor/
+COPY --from=assets --chown=www-data:www-data /app/public/build/ /var/www/html/public/build/
 
-# Copy the rest of the application
-COPY . .
+# Copy application files
+COPY --chown=www-data:www-data . .
 
-# Set correct permissions
-RUN chown -R www-data:www-data /app/storage /app/bootstrap/cache \
-    && chmod -R 775 /app/storage /app/bootstrap/cache
+# Create necessary directories and set permissions
+RUN mkdir -p \
+        storage/framework/cache/data \
+        storage/framework/sessions \
+        storage/framework/views \
+        storage/logs \
+        bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache \
+    && chmod -R 775 storage bootstrap/cache
+
+# Optimize Laravel (cache config, routes, views)
+#RUN php artisan config:cache \
+#    && php artisan route:cache \
+#    && php artisan view:cache
+
+# Switch to www-data user
+USER www-data
 
 # Expose port 9000 for PHP-FPM
 EXPOSE 9000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD php-fpm -t || exit 1
+
 CMD ["php-fpm"]

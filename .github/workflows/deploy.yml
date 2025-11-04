@@ -1,104 +1,79 @@
-name: Deploy Laravel App to AWS
-
-# Trigger this workflow on pushes to the 'main' branch
-on:
-  push:
-    branches: [ "main" ]
-
-env:
-  # Set your AWS region
-  AWS_REGION: "us-east-1"
-  # Set your ECR repo name from main.tf
-  ECR_REPOSITORY: my-laravel-app-prod
-  ECS_CLUSTER: my-laravel-app-prod-cluster
-  ECS_SERVICE: my-laravel-app-prod-service
-  ECS_TASK_DEFINITION: my-laravel-app-prod-app # This is the "family" name
-
-jobs:
-  # ----------------------------------------------------
-  # JOB 1: Update the Infrastructure with Terraform
-  # ----------------------------------------------------
-  deploy-infrastructure:
-    name: "Deploy Infrastructure (Terraform)"
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: "Checkout Code"
-        uses: actions/checkout@v4
-
-      - name: "Configure AWS Credentials"
-        # This step now reads your secrets
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: "Setup Terraform"
-        uses: hashicorp/setup-terraform@v3
-
-      - name: "Terraform Init"
-        run: terraform init
-        working-directory: ./infrastructure/environments/prod
-
-      - name: "Terraform Apply"
-        run: |
-          terraform apply -auto-approve \
-            -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="grafana_api_key=${{ secrets.GRAFANA_API_KEY }}"
-        working-directory: ./infrastructure/environments/prod
-
-  # ----------------------------------------------------
-  # JOB 2: Build and Deploy the Laravel App to ECS
-  # ----------------------------------------------------
-  build-and-deploy-app:
-    name: "Build & Deploy App (ECS)"
-    runs-on: ubuntu-latest
-    needs: deploy-infrastructure
-
-    steps:
-      - name: "Checkout Code"
-        uses: actions/checkout@v4
-
-      - name: "Configure AWS Credentials"
-        # This step also reads your secrets
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: "Login to Amazon ECR"
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: "Build, tag, and push image to ECR"
-        id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }} # Use the commit hash as the tag
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f laravel-app/Dockerfile ./laravel-app
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-
-      - name: "Download task definition"
-        run: |
-          aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} \
-            --query taskDefinition > task-definition.json
-
-      - name: "Fill in the new image in the task definition"
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: task-definition.json
-          container-name: ${{ env.ECR_REPOSITORY }} # Must match the name in your TF file
-          image: ${{ steps.build-image.outputs.image }}
-
-      - name: "Deploy new task definition to ECS service"
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
+#name: Deploy Laravel App
+#
+#on:
+#  push:
+#    branches:
+#      - main
+#
+#env:
+#  AWS_REGION: ap-southeast-1
+#  ECR_REPOSITORY: laravel-app
+#  PROJECT_DIR: /home/ec2-user/scalable-app
+#
+#jobs:
+#  deploy:
+#    name: Build, Push, and Deploy
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v3
+#
+#      # 1. Configure AWS credentials
+#      - name: Configure AWS Credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          aws-region: ${{ secrets.AWS_REGION }}
+#
+#      # 2. Log in to ECR and get repo URL
+#      - name: Log in to Amazon ECR
+#        id: login-ecr
+#        uses: aws-actions/amazon-ecr-login@v2
+#
+#      # 3. Build, tag, and push Docker image
+#      - name: Build and push Laravel image
+#        id: build-image
+#        env:
+#          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#          IMAGE_TAG: ${{ github.sha }}
+#        run: |
+#          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f laravel-app/Dockerfile ./laravel-app
+#          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+#          # Store the full image URL for the deploy step
+#          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+#
+#      # 4. SSH into server and deploy
+#      - name: Deploy to EC2
+#        uses: appleboy/ssh-action@master
+#        with:
+#          host: ${{ secrets.EC2_HOST_DNS }}
+#          username: ec2-user
+#          key: ${{ secrets.EC2_SSH_KEY }}
+#          script: |
+#            # 1. Clone or pull the repo
+#            if [ -d ${{ env.PROJECT_DIR }} ]; then
+#              cd ${{ env.PROJECT_DIR }}
+#              git pull
+#            else
+#              git clone https://github.com/${{ github.repository }}.git ${{ env.PROJECT_DIR }}
+#              cd ${{ env.PROJECT_DIR }}
+#            fi
+#            
+#            # 2. Log in to ECR (EC2 instance needs IAM role for this)
+#            # Make sure your EC2 instance has an IAM Role attached
+#            # that allows ECR actions (e.g., AmazonEC2ContainerRegistryReadOnly)
+#            sudo aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+#
+#            # 3. Update the image reference in docker-compose.yml
+#            # This replaces the 'build' section with the new image
+#            sed -i "s|build:.*|image: ${{ steps.build-image.outputs.image }}|g" docker-compose.yml
+#            sed -i "/context:/d" docker-compose.yml
+#            sed -i "/dockerfile:/d" docker-compose.yml
+#
+#            # 4. Pull the new laravel-app image
+#            sudo /usr/local/bin/docker-compose pull laravel-app
+#
+#            # 5. Restart all services with the new image
+#            sudo /usr/local/bin/docker-compose up -d
