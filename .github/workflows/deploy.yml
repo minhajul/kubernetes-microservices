@@ -1,0 +1,67 @@
+name: Deploy Laravel App to AWS ECS
+
+on:
+  push:
+    branches: [ main ]
+
+# Environment variables
+env:
+  AWS_REGION: ap-southeast-1             # Your AWS region
+  ECR_REPOSITORY: laravel-app            # Your ECR repo name
+  ECS_CLUSTER: laravel-cluster           # Your ECS cluster name
+  ECS_SERVICE: laravel-service           # Your ECS service name
+  ECS_TASK_DEFINITION: laravel-app       # Your ECS task definition family
+  CONTAINER_NAME: laravel-app            # The name in your task definition
+
+# This is the modern, secure way to give GitHub Actions AWS access
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read    # Required to check out the code
+
+jobs:
+  deploy:
+    name: Build, Push, and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-role # 👈 Set up this IAM Role in AWS
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        run: |
+          docker build -t $ECR_REGISTRY_NAME/$ECR_REPOSITORY:${{ github.sha }} -f laravel-app/Dockerfile ./laravel-app
+          docker push $ECR_REGISTRY_NAME/$ECR_REPOSITORY:${{ github.sha }}
+          echo "image=$ECR_REGISTRY_NAME/$ECR_REPOSITORY:${{ github.sha }}" >> $GITHUB_OUTPUT
+        env:
+          ECR_REGISTRY_NAME: ${{ steps.login-ecr.outputs.registry }}
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+            --query taskDefinition > task-definition.json
+
+      - name: Fill in the new image in the task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy new task definition to ECS service
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true # Waits for the new version to be healthy
