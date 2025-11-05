@@ -5,48 +5,38 @@ global:
     environment: 'production'
     cluster: 'main'
 
-# Alertmanager configuration (optional, but recommended)
-# alerting:
-#   alertmanagers:
-#     - static_configs:
-#         - targets: ['alertmanager:9093']
-
-# Load rules once and periodically evaluate them
-# rule_files:
-#   - "alerts/*.yml"
-
 scrape_configs:
   # Prometheus self-monitoring
   - job_name: 'prometheus'
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: [ 'localhost:9090' ]
         labels:
           service: 'prometheus'
 
   # Nginx metrics
   - job_name: 'nginx'
     static_configs:
-      - targets: ['nginx-exporter:9113']
+      - targets: [ 'nginx-exporter:9113' ]
         labels:
           service: 'nginx'
 
-  # PostgreSQL metrics
-  - job_name: 'postgres'
+  # MySQL metrics
+  - job_name: 'mysql'
     static_configs:
-      - targets: ['postgres-exporter:9187']
+      - targets: [ 'mysql-exporter:9187' ]
         labels:
-          service: 'postgres'
+          service: 'mysql'
 
   # Redis metrics
   - job_name: 'redis'
     static_configs:
-      - targets: ['redis-exporter:9121']
+      - targets: [ 'redis-exporter:9121' ]
         labels:
           service: 'redis'
 
-  # Optional: Laravel app metrics (if you implement PHP-FPM exporter or custom metrics)
-  # - job_name: 'laravel'
-  #   static_configs:
-  #     - targets: ['laravel-app:9253']
-  #       labels:
-  #         service: 'laravel-app'
+  #  Laravel app metrics
+  - job_name: 'laravel-app'
+    static_configs:
+      - targets: [ 'laravel-app:8081' ]
+        labels:
+          service: 'laravel-app'

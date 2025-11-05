@@ -60,7 +60,7 @@
 #              git clone https://github.com/${{ github.repository }}.git ${{ env.PROJECT_DIR }}
 #              cd ${{ env.PROJECT_DIR }}
 #            fi
-#            
+#
 #            # 2. Log in to ECR (EC2 instance needs IAM role for this)
 #            # Make sure your EC2 instance has an IAM Role attached
 #            # that allows ECR actions (e.g., AmazonEC2ContainerRegistryReadOnly)
