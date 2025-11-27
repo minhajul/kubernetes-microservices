@@ -1,0 +1,49 @@
+- name: Configure EKS System Applications
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    kube_config_path: "~/.kube/config"
+
+  tasks:
+    - name: Create Monitoring Namespace
+      kubernetes.core.k8s:
+        name: monitoring
+        api_version: v1
+        kind: Namespace
+        state: present
+
+    - name: Deploy Loki (Log Storage)
+      kubernetes.core.helm:
+        name: loki
+        chart_ref: grafana/loki
+        release_namespace: monitoring
+        repo_url: https://grafana.github.io/helm-charts
+        values_files:
+          - "{{ loki_values_file }}"
+
+    - name: Deploy Fluent Bit (Log Collector DaemonSet)
+      kubernetes.core.helm:
+        name: fluent-bit
+        chart_ref: fluent/fluent-bit
+        release_namespace: monitoring
+        repo_url: https://fluent.github.io/helm-charts
+        values_files:
+          - ../k8s-values/fluent-bit-values.yaml
+
+    - name: Deploy Grafana (Visualizer)
+      kubernetes.core.helm:
+        name: grafana
+        chart_ref: grafana/grafana
+        release_namespace: monitoring
+        repo_url: https://grafana.github.io/helm-charts
+        values:
+          datasources:
+            datasources.yaml:
+              apiVersion: 1
+              datasources:
+                - name: Loki
+                  type: loki
+                  url: http://loki-gateway.monitoring.svc.cluster.local
+                  access: proxy

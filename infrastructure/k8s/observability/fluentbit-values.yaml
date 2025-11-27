@@ -1,0 +1,17 @@
+config:
+  inputs: |
+    [INPUT]
+        Name              tail
+        Path              /var/log/containers/*.log
+        Parser            docker
+        Tag               kube.*
+        Mem_Buf_Limit     5MB
+        Skip_Long_Lines   On
+
+  outputs: |
+    [OUTPUT]
+        Name            loki
+        Match           *
+        Host            loki.monitoring.svc.cluster.local
+        Port            3100
+        Labels          job=fluent-bit
