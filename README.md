@@ -13,7 +13,7 @@ scalable-app/
 │   ├── backend-service/           # Laravel API (Business Logic)
 │   └── frontend/                  # Next.js (Client Side Rendering)
 │
-└── infrastructure/                # ☁️ Infrastructure as Code
+└── infrastructure/                # Infrastructure as Code
     ├── k8s/                       # Kubernetes Manifests
     │   └── apps/                  # Application Deployments (Auth, Frontend, MySQL)
     │
