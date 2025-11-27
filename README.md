@@ -1,18 +1,14 @@
-Here is a complete, production-ready `README.md` file. It covers installation, architecture, daily development workflows, and troubleshooting.
+## Scalable Microservices Architecture
 
-Save this as **`README.md`** in the root of your `scalable-app` folder.
+A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes** (
+Orchestration), complete with a full observability suite (Loki, Grafana, Fluent Bit).
 
-````markdown
-# Scalable Microservices Architecture
-
-A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes** (Orchestration), complete with a full observability suite (Loki, Grafana, Fluent Bit).
-
-## 📂 Project Structure
+### Project Structure
 
 ```text
 scalable-app/
-├── Makefile                       # 🛠 Command Center (Build & Deploy automation)
-├── apps/                          # 💻 Source Code
+├── Makefile                       # Command Center (Build & Deploy automation)
+├── apps/                          # Source Code
 │   ├── auth-service/              # Laravel API (Authentication & Users)
 │   ├── backend-service/           # Laravel API (Business Logic)
 │   └── frontend/                  # Next.js (Client Side Rendering)
@@ -27,25 +23,21 @@ scalable-app/
         └── grafana-values.yaml    # Visualization Dashboard
 ````
 
------
-
-## 🚀 Prerequisites
+### Prerequisites
 
 Ensure you have the following tools installed globally:
 
-1.  **Docker Desktop** (Enable Kubernetes in Settings).
-2.  **Helm** (Kubernetes Package Manager).
+1. **Docker Desktop** (Enable Kubernetes in Settings).
+2. **Helm** (Kubernetes Package Manager).
     * *Mac:* `brew install helm`
-    * *Windows:* `choco install kubernetes-helm`
-3.  **Make** (Build automation tool).
+3. **Make** (Build automation tool).
 
------
+### Quick Start
 
-## ⚡ Quick Start
+We use a `Makefile` to automate the complex sequence of building Docker images, installing Helm charts, and applying
+Kubernetes manifests.
 
-We use a `Makefile` to automate the complex sequence of building Docker images, installing Helm charts, and applying Kubernetes manifests.
-
-### 1\. Start the Environment
+#### 1\. Start the Environment
 
 Run this single command to build and deploy everything:
 
@@ -53,21 +45,20 @@ Run this single command to build and deploy everything:
 make start
 ```
 
-### 2\. Access the Applications
+#### 2\. Access the Applications
 
-| Service | URL / Access Method | Description |
-| :--- | :--- | :--- |
-| **Frontend** | [http://localhost](https://www.google.com/search?q=http://localhost) | Next.js App (Exposed via LoadBalancer) |
-| **Auth API** | `kubectl port-forward svc/auth-service 8000:80` | Internal API. Forward port to access at `localhost:8000` |
-| **Grafana** | `make grafana-open` | Monitoring Dashboard. (User: `admin`) |
+| Service      | URL / Access Method                                                  | Description                                              |
+|:-------------|:---------------------------------------------------------------------|:---------------------------------------------------------|
+| **Frontend** | [http://localhost](https://www.google.com/search?q=http://localhost) | Next.js App (Exposed via LoadBalancer)                   |
+| **Auth API** | `kubectl port-forward svc/auth-service 8000:80`                      | Internal API. Forward port to access at `localhost:8000` |
+| **Grafana**  | `make grafana-open`                                                  | Monitoring Dashboard. (User: `admin`)                    |
 
------
+### Daily Development Workflow
 
-## 🛠 Daily Development Workflow
+Since the code runs inside containers, you cannot simply "refresh" the browser to see backend changes. Follow these
+steps:
 
-Since the code runs inside containers, you cannot simply "refresh" the browser to see backend changes. Follow these steps:
-
-### 1\. Making Code Changes (PHP/JS)
+#### 1\. Making Code Changes (PHP/JS)
 
 After editing files in `apps/auth-service` or `apps/frontend`:
 
@@ -83,7 +74,7 @@ docker build --no-cache -t auth-service:latest ./apps/auth-service
 kubectl rollout restart deployment auth-service
 ```
 
-### 2\. Database Migrations
+#### 2\. Database Migrations
 
 The database runs inside the cluster. To migrate the schema:
 
@@ -92,7 +83,7 @@ The database runs inside the cluster. To migrate the schema:
 kubectl exec -it deploy/auth-service -- php artisan migrate
 ```
 
-### 3\. Creating New Controllers
+#### 3\. Creating New Controllers
 
 Generate the file inside the container, then copy it out to your host machine:
 
@@ -104,7 +95,7 @@ kubectl exec deploy/auth-service -- php artisan make:controller TeamController
 kubectl cp $(kubectl get pods -l app=auth-service -o jsonpath="{.items[0].metadata.name}"):/var/www/app/Http/Controllers/TeamController.php ./apps/auth-service/app/Http/Controllers/TeamController.php
 ```
 
-### 4\. Debugging 404 Errors (New Routes)
+#### 4\. Debugging 404 Errors (New Routes)
 
 If you add a route but get a 404, the container is likely using a cached route list.
 
@@ -113,21 +104,19 @@ kubectl exec deploy/auth-service -- php artisan route:clear
 kubectl exec deploy/auth-service -- composer dump-autoload
 ```
 
------
-
-## 📊 Observability (Logs)
+### Observability (Logs)
 
 We use **Fluent Bit** to scrape container logs and send them to **Loki**.
 
-1.  Run `make grafana-open`.
-2.  Copy the password displayed in the terminal.
-3.  Open [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) and login.
-4.  Navigate to **Explore** (Compass Icon) -\> Select **Loki**.
-5.  Run query: `{job="fluent-bit"}` to see all logs.
+1. Run `make grafana-open`.
+2. Copy the password displayed in the terminal.
+3. Open [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) and login.
+4. Navigate to **Explore** (Compass Icon) -\> Select **Loki**.
+5. Run query: `{job="fluent-bit"}` to see all logs.
 
 -----
 
-## 🐛 Troubleshooting
+### Troubleshooting
 
 **1. "Pending" Pods**
 
@@ -143,14 +132,7 @@ We use **Fluent Bit** to scrape container logs and send them to **Loki**.
 
 * **Fix:** Ensure you are running `make` from the root `scalable-app/` directory, not inside a subdirectory.
 
------
-
-## 🗑 Cleanup
+### Cleanup
 
 * **Stop Apps:** `make clean` (Deletes apps, keeps DB/Logs).
 * **Stop Everything:** `make nuke` (Deletes Apps, DB, Logs, and Monitoring stack).
-
-<!-- end list -->
-
-```
-```
