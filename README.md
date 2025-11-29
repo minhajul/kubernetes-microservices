@@ -1,4 +1,4 @@
-## Scalable Microservices Architecture
+## Kubernetes Microservices Architecture
 
 A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes**, complete
 with a full observability suite (Loki, Grafana, Fluent Bit).
@@ -6,7 +6,7 @@ with a full observability suite (Loki, Grafana, Fluent Bit).
 ### Project Structure
 
 ```text
-scalable-app/
+kubernetes-microservices/
 ├── Makefile                       # Command Center (Build & Deploy automation)
 ├── README.md                      # Readme docs
 ├── apps/                          # Source Code
@@ -129,7 +129,7 @@ We use **Fluent Bit** to scrape container logs and send them to **Loki**.
 
 **3. Helm Errors ("No such file")**
 
-* **Fix:** Ensure you are running `make` from the root `scalable-app/` directory, not inside a subdirectory.
+* **Fix:** Ensure you are running `make` from the root `kubernetes-microservices/` directory, not inside a subdirectory.
 
 ### Cleanup
 
