@@ -1,13 +1,14 @@
 ## Scalable Microservices Architecture
 
-A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes** (
-Orchestration), complete with a full observability suite (Loki, Grafana, Fluent Bit).
+A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes**, complete
+with a full observability suite (Loki, Grafana, Fluent Bit).
 
 ### Project Structure
 
 ```text
 scalable-app/
 ├── Makefile                       # Command Center (Build & Deploy automation)
+├── README.md                      # Readme docs
 ├── apps/                          # Source Code
 │   ├── auth-service/              # Laravel API (Authentication & Users)
 │   ├── backend-service/           # Laravel API (Business Logic)
@@ -47,11 +48,11 @@ make start
 
 #### 2\. Access the Applications
 
-| Service      | URL / Access Method                                                  | Description                                              |
-|:-------------|:---------------------------------------------------------------------|:---------------------------------------------------------|
-| **Frontend** | [http://localhost](https://www.google.com/search?q=http://localhost) | Next.js App (Exposed via LoadBalancer)                   |
-| **Auth API** | `kubectl port-forward svc/auth-service 8000:80`                      | Internal API. Forward port to access at `localhost:8000` |
-| **Grafana**  | `make grafana-open`                                                  | Monitoring Dashboard. (User: `admin`)                    |
+| Service      | URL / Access Method                             | Description                                              |
+|:-------------|:------------------------------------------------|:---------------------------------------------------------|
+| **Frontend** | [http://localhost](http://localhost)            | Next.js App (Exposed via LoadBalancer)                   |
+| **Auth API** | `kubectl port-forward svc/auth-service 8000:80` | Internal API. Forward port to access at `localhost:8000` |
+| **Grafana**  | `make grafana-open`                             | Monitoring Dashboard. (User: `admin`)                    |
 
 ### Daily Development Workflow
 
@@ -113,8 +114,6 @@ We use **Fluent Bit** to scrape container logs and send them to **Loki**.
 3. Open [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) and login.
 4. Navigate to **Explore** (Compass Icon) -\> Select **Loki**.
 5. Run query: `{job="fluent-bit"}` to see all logs.
-
------
 
 ### Troubleshooting
 
