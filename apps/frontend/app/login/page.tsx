@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { useAuth } from "../contexts/AuthContext";
+import {useState} from "react";
+import {useAuth} from "../contexts/AuthContext";
 import Link from "next/link";
 
 export default function Login() {
-    const { login } = useAuth();
+    const {login} = useAuth();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
@@ -23,7 +23,7 @@ export default function Login() {
                     "Content-Type": "application/json",
                     Accept: "application/json",
                 },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({email, password}),
             });
 
             const data = await res.json();
@@ -31,7 +31,6 @@ export default function Login() {
             if (res.ok) {
                 await login(data.token);
             } else {
-                // Handle Validation Errors from Laravel
                 const validationError = data.errors?.email?.[0] || data.errors?.password?.[0];
                 setError(data.message || validationError || "Login failed");
             }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { useAuth } from "../contexts/AuthContext";
+import {useState} from "react";
+import {useAuth} from "../contexts/AuthContext";
 import Link from "next/link";
 
 export default function Register() {
-    const { login } = useAuth();
+    const {login} = useAuth();
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -24,16 +24,14 @@ export default function Register() {
                     "Content-Type": "application/json",
                     Accept: "application/json",
                 },
-                body: JSON.stringify({ name, email, password }),
+                body: JSON.stringify({name, email, password}),
             });
 
             const data = await res.json();
 
             if (res.ok) {
-                // Auto-login after successful registration
                 await login(data.token);
             } else {
-                // Handle Laravel validation errors nicely
                 const validationError =
                     data.errors?.name?.[0] ||
                     data.errors?.email?.[0] ||
