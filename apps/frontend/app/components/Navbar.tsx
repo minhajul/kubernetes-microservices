@@ -22,7 +22,7 @@ export default function Navbar() {
                                     </span>
                                     <button
                                         onClick={logout}
-                                        className="text-sm px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+                                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
                                     >
                                         Logout
                                     </button>
