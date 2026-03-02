@@ -6,10 +6,10 @@ use App\Http\Controllers\Api\AuthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function (Request $request) {
+Route::get('/', function () {
     return response()->json([
         'success' => true,
-        'data' => $request->all(),
+        'data' => "Welcome to Api Service",
     ]);
 });
 
