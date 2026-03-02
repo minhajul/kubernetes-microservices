@@ -1,6 +1,7 @@
 ## Auth Service
 
-The Auth Service is a microservice built with Laravel. It provides user authentication and authorization functionalities for the larger system, utilizing Laravel Sanctum for API token management.
+The Auth Service is a microservice built with Laravel. It provides user authentication and authorization functionalities
+for the larger system, utilizing Laravel Sanctum for API token management.
 
 ### Features
 
@@ -8,7 +9,8 @@ The Auth Service is a microservice built with Laravel. It provides user authenti
 - **User Login:** Authenticate and issue API tokens.
 - **User Logout:** Revoke active tokens.
 - **User Information:** Retrieve details of the authenticated user.
-- **Containerized:** Includes a `Dockerfile` for easy containerization and deployment within a Kubernetes or Docker environment.
+- **Containerized:** Includes a `Dockerfile` for easy containerization and deployment within a Kubernetes or Docker
+  environment.
 
 ### Prerequisites
 
@@ -47,17 +49,19 @@ The Auth Service is a microservice built with Laravel. It provides user authenti
    touch database/database.sqlite
    php artisan migrate
    ```
-   *(Note: You can update the `DB_CONNECTION` and other `DB_*` variables in the `.env` file to connect to MySQL or PostgreSQL).*
+   *(Note: You can update the `DB_CONNECTION` and other `DB_*` variables in the `.env` file to connect to MySQL or
+   PostgreSQL).*
 
 ### Running the Application Locally
 
-You can use the built-in Composer `dev` script or Laravel's development server:
+You can use the built-in Composer `dev` script or `Laravel's` development server:
 
 ```bash
 composer run dev
 ```
 
 Alternatively, you can just run the server:
+
 ```bash
 php artisan serve
 ```
@@ -71,26 +75,27 @@ All API endpoints reside within the `/api` prefix and return JSON responses.
 #### Public Endpoints
 
 - **`GET /api/`**
-  - **Description:** Health check / basic response endpoint.
+    - **Description:** Health check / basic response endpoint.
 - **`POST /api/register`**
-  - **Description:** Register a new user account.
+    - **Description:** Register a new user account.
 - **`POST /api/login`**
-  - **Description:** Authenticate user credentials and return a Sanctum API token.
+    - **Description:** Authenticate user credentials and return a Sanctum API token.
 
 #### Protected Endpoints (Require Bearer Token)
 
 These endpoints require an `Authorization: Bearer <token>` header, where the token is obtained from the login route.
 
 - **`GET /api/user`**
-  - **Description:** Retrieve the currently authenticated user's information.
+    - **Description:** Retrieve the currently authenticated user's information.
 - **`POST /api/logout`**
-  - **Description:** Log out the currently authenticated user and revoke their current token.
+    - **Description:** Log out the currently authenticated user and revoke their current token.
 
 ### Code Quality & Testing
 
 This project uses [Pest PHP](https://pestphp.com/) for its test suite and Laravel Pint for code styling.
 
 **Running Tests:**
+
 ```bash
 composer test
 # OR
@@ -98,6 +103,7 @@ php artisan test
 ```
 
 **Running Linter (Pint):**
+
 ```bash
 composer run lint
 ```
