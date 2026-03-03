@@ -119,7 +119,7 @@ We use **Fluent Bit** to scrape container logs and send them to **Loki**.
 
 **1. "Pending" Pods**
 
-* **Symptom:** Pods stay in yellow "Pending" state forever.
+* **Symptom:** Pods stay in the yellow "Pending" state forever.
 * **Fix:** Docker Desktop -\> Settings -\> Resources. Increase Memory to at least **4GB**.
 
 **2. "ImagePullBackOff"**
