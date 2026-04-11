@@ -45,7 +45,8 @@ export const AuthProvider = ({children}: { children: React.ReactNode }) => {
 
     const fetchUser = async (authToken: string) => {
         try {
-            const res = await fetch("http://localhost:8000/api/user", {
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+            const res = await fetch(`${apiUrl}/api/user`, {
                 headers: {
                     Authorization: `Bearer ${authToken}`,
                     Accept: "application/json",
@@ -79,7 +80,8 @@ export const AuthProvider = ({children}: { children: React.ReactNode }) => {
     const logout = async () => {
         if (token) {
             try {
-                await fetch("http://localhost:8000/api/logout", {
+                const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+                await fetch(`${apiUrl}/api/logout`, {
                     method: "POST",
                     headers: {
                         Authorization: `Bearer ${token}`,
@@ -93,7 +95,7 @@ export const AuthProvider = ({children}: { children: React.ReactNode }) => {
         localStorage.removeItem("auth_token");
         setToken(null);
         setUser(null);
-        router.push("/login"); // Fixed router call
+        router.push("/login");
     };
 
     return (

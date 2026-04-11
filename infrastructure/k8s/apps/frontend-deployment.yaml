@@ -18,7 +18,9 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: NEXT_PUBLIC_API_URL
-              value: "http://auth-service" # K8s internal DNS
+              value: "http://auth-service:8000"
+            - name: NEXT_PUBLIC_APP_URL
+              value: "http://frontend-service"
           ports:
             - containerPort: 3000
 ---
