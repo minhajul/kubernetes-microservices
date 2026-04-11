@@ -31,7 +31,7 @@ final class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'access_token' => $token,
+            'token' => $token,
         ]);
     }
 
@@ -54,7 +54,7 @@ final class AuthController extends Controller
 
         return response()->json([
             'success' => true,
-            'access_token' => $token,
+            'token' => $token,
         ]);
     }
 

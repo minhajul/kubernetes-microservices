@@ -20,11 +20,16 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (AuthenticationException $e, Request $request) {
-            if ($request->is('api/*')) {
+            if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'message' => 'You must be logged in to access this resource.',
                     'success' => false,
                 ], 401);
             }
+
+            return response()->json([
+                'message' => $e->getMessage(),
+                'success' => false,
+            ], 401);
         });
     })->create();
