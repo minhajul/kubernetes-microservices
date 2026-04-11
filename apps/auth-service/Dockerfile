@@ -22,7 +22,7 @@ COPY . .
 
 # Install PHP dependencies
 # Note: In production, you would run --no-dev --optimize-autoloader
-RUN composer install
+RUN composer update
 
 # Expose port 8000
 EXPOSE 8000
