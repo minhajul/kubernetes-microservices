@@ -51,7 +51,17 @@ grafana-open:
 	kubectl port-forward svc/grafana -n $(OBSERVABILITY_NS) 3000:80
 
 clean:
-	kubectl delete -f infrastructure/k8s/apps/
-	helm uninstall loki -n $(OBSERVABILITY_NS)
-	helm uninstall fluent-bit -n $(OBSERVABILITY_NS)
-	helm uninstall grafana -n $(OBSERVABILITY_NS)
+	@echo "Stopping and deleting Kubernetes resources..."
+	kubectl delete -f infrastructure/k8s/apps/ || true
+	helm uninstall loki -n $(OBSERVABILITY_NS) || true
+	helm uninstall fluent-bit -n $(OBSERVABILITY_NS) || true
+	helm uninstall grafana -n $(OBSERVABILITY_NS) || true
+	@echo "Removing Docker images..."
+	docker rmi auth-service:latest frontend:latest || true
+	@echo "Cleanup complete!"
+
+# 6. Full Prune (Images, Containers, Volumes, Networks)
+prune: clean
+	@echo "Pruning unused Docker resources..."
+	docker system prune -af --volumes
+	@echo "All clean!"
