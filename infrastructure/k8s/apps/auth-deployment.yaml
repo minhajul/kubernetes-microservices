@@ -12,13 +12,43 @@ spec:
       labels:
         app: auth-service
     spec:
+      initContainers:
+        - name: migration
+          image: auth-service:latest
+          imagePullPolicy: IfNotPresent
+          command: ["php", "artisan", "migrate", "--force"]
+          env:
+            - name: DB_CONNECTION
+              value: "mysql"
+            - name: DB_HOST
+              value: "mysql"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_DATABASE
+              value: "app_db"
+            - name: DB_USERNAME
+              value: "root"
+            - name: DB_PASSWORD
+              value: "secret"
       containers:
         - name: auth-service
           image: auth-service:latest
           imagePullPolicy: IfNotPresent  # <--- CRITICAL FOR LOCAL DEV
           env:
+            - name: APP_KEY
+              value: "base64:zmRo5jo2BqnWlVLnqbCy7XBq+sVEtIb6TigyzWmymuk="
+            - name: APP_DEBUG
+              value: "true"
+            - name: DB_CONNECTION
+              value: "mysql"
             - name: DB_HOST
               value: "mysql"
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_DATABASE
+              value: "app_db"
+            - name: DB_USERNAME
+              value: "root"
             - name: DB_PASSWORD
               value: "secret"
             - name: LOG_CHANNEL

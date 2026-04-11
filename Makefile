@@ -8,7 +8,7 @@ build:
 	@echo "Building Auth Service..."
 	docker build -t auth-service:latest ./apps/auth-service
 	@echo "Building Frontend..."
-	docker build -t frontend:latest ./apps/frontend
+	docker build --build-arg NEXT_PUBLIC_API_URL="http://auth-service:8000" -t frontend:latest ./apps/frontend
 
 # 2. Deploy Observability (Loki, FluentBit, Grafana) via Helm
 deploy-infra:
