@@ -1,16 +1,27 @@
 # Variables
 OBSERVABILITY_NS := monitoring
+NEXT_PUBLIC_API_URL ?= http://localhost:8000
 
-.PHONY: build deploy-infra deploy-apps clean
+.PHONY: build build-push deploy-infra deploy-apps clean
 
 # 1. Build Docker Images Locally
 build:
 	@echo "Building Auth Service..."
 	docker build -t auth-service:latest ./apps/auth-service
-	@echo "Building Frontend..."
-	docker build --build-arg NEXT_PUBLIC_API_URL="http://auth-service:8000" -t frontend:latest ./apps/frontend
+	@echo "Building Frontend with API URL: $(NEXT_PUBLIC_API_URL)..."
+	docker build --build-arg NEXT_PUBLIC_API_URL="$(NEXT_PUBLIC_API_URL)" -t frontend:latest ./apps/frontend
 
-# 2. Deploy Observability (Loki, FluentBit, Grafana) via Helm
+# 2. Build and push to registry (for k8s deployment)
+build-push:
+	@echo "Building Auth Service..."
+	docker build -t auth-service:latest ./apps/auth-service
+	@echo "Building Frontend with API URL: $(NEXT_PUBLIC_API_URL)..."
+	docker build --build-arg NEXT_PUBLIC_API_URL="$(NEXT_PUBLIC_API_URL)" -t frontend:latest ./apps/frontend
+	@echo "Pushing images..."
+	docker push auth-service:latest
+	docker push frontend:latest
+
+# 3. Deploy Observability (Loki, FluentBit, Grafana) via Helm
 deploy-infra:
 	@echo "Deploying Observability Stack..."
 	helm repo add grafana https://grafana.github.io/helm-charts
@@ -32,18 +43,18 @@ deploy-infra:
 		--namespace $(OBSERVABILITY_NS) \
 		-f infrastructure/k8s/observability/grafana-values.yaml
 
-# 3. Deploy Your Apps (and MySQL)
+# 4. Deploy Your Apps (and MySQL)
 deploy-apps:
 	@echo "Deploying Applications..."
 	kubectl apply -f infrastructure/k8s/apps/
 	# Force restart to pick up new image builds if tags didn't change
 	kubectl rollout restart deployment auth-service frontend
 
-# 4. Master Command
+# 5. Master Command
 start: build deploy-infra deploy-apps
 	@echo "Done! Frontend should be available at http://localhost"
 
-# 5. Access Grafana
+# 6. Access Grafana
 grafana-open:
 	@echo "Getting Grafana Password..."
 	@kubectl get secret --namespace $(OBSERVABILITY_NS) grafana -o jsonpath="{.data.admin-password}" | base64 --decode
@@ -60,7 +71,7 @@ clean:
 	docker rmi auth-service:latest frontend:latest || true
 	@echo "Cleanup complete!"
 
-# 6. Full Prune (Images, Containers, Volumes, Networks)
+# 7. Full Prune (Images, Containers, Volumes, Networks)
 prune: clean
 	@echo "Pruning unused Docker resources..."
 	docker system prune -af --volumes
