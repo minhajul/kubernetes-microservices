@@ -9,6 +9,7 @@ export default function Register() {
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [passwordConfirmation, setPasswordConfirmation] = useState("");
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
 
@@ -25,7 +26,7 @@ export default function Register() {
                     "Content-Type": "application/json",
                     Accept: "application/json",
                 },
-                body: JSON.stringify({name, email, password}),
+                body: JSON.stringify({name, email, password, passwordConfirmation}),
             });
 
             const data = await res.json();
@@ -94,6 +95,21 @@ export default function Register() {
                         className="w-full px-4 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium mb-1" htmlFor="password_confirmation">
+                        Password Confirmation
+                    </label>
+                    <input
+                        id="password_confirmation"
+                        type="password"
+                        required
+                        minLength={6}
+                        className="w-full px-4 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        value={passwordConfirmation}
+                        onChange={(e) => setPasswordConfirmation(e.target.value)}
                     />
                 </div>
                 <button
