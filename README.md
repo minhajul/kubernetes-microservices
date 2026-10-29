@@ -348,6 +348,7 @@ Things to know:
 
 ### Cleanup
 
-* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server. Keeps
-  the RustFS data PVC and its credentials Secret; see "Log storage (RustFS)").
+* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server. Also
+  deletes MySQL's `mysql-data` PVC, which wipes the database. Keeps the RustFS data PVC and its credentials Secret;
+  see "Log storage (RustFS)").
 * **Full Prune:** `make prune` (Runs `make clean`, then prunes all unused Docker images, containers, volumes and networks).

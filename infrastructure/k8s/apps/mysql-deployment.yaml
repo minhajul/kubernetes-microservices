@@ -8,6 +8,19 @@ spec:
   selector:
     app: mysql
 ---
+# MySQL's data directory, so the database survives pod restarts and redeploys.
+# Uses the cluster's default StorageClass. `make clean` deletes it (and the data).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,8 +40,8 @@ spec:
       automountServiceAccountToken: false
       # The official image starts as root only to chown its dirs and then drops to its
       # "mysql" user (999). The image already owns /var/lib/mysql and /var/run/mysqld as
-      # 999 (mode 1777), so starting as 999 skips that root step. fsGroup makes a PVC
-      # mounted at /var/lib/mysql later writable too.
+      # 999 (mode 1777), so starting as 999 skips that root step. fsGroup makes the
+      # mysql-data PVC mounted at /var/lib/mysql writable too.
       securityContext:
         runAsNonRoot: true
         runAsUser: 999
@@ -46,6 +59,9 @@ spec:
               value: "app_db"
           ports:
             - containerPort: 3306
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
           # First boot initialises the data dir on a socket-only temporary server,
           # which can take minutes on a laptop. Ping over TCP so that phase doesn't count.
           # All probes run inside the container, so NetworkPolicies on 3306 can't affect them.
@@ -78,3 +94,7 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-data
