@@ -52,7 +52,7 @@ spec:
       containers:
         - name: mysql
           image: mysql:8.0
-          # Secrets are created by `make deploy-app-secrets`, never committed. The image only
+          # Secrets come from Vault via security-vault-secrets.yaml, never committed. The image only
           # applies them when it initializes an empty data directory: it sets the root
           # password and creates the app user with full access to app_db only. Changing them
           # later needs ALTER USER, or a fresh mysql-data PVC.

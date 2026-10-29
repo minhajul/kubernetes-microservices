@@ -74,7 +74,7 @@ spec:
           image: auth-service:latest
           imagePullPolicy: IfNotPresent  # <--- CRITICAL FOR LOCAL DEV
           env:
-            # Secrets are created by `make deploy-app-secrets`, never committed.
+            # Secrets come from Vault via security-vault-secrets.yaml, never committed.
             - name: APP_KEY
               valueFrom:
                 secretKeyRef:

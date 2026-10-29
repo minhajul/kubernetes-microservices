@@ -21,6 +21,8 @@ kubernetes-microservices/
     └── k8s/                       # Kubernetes Manifests
         ├── apps/                  # Deployments (Auth, Frontend, MySQL), scaling-*.yaml, security-*.yaml
         ├── optional/vpa/          # Recommendation-only VPA (`make deploy-vpa`)
+        ├── vault/                 # Vault and Vault Secrets Operator values, setup.sh
+
         └── observability/         # Helm values for the monitoring stack
             ├── kube-prometheus-stack-values.yaml # Prometheus, Alertmanager, alert rules
             ├── metrics-server-values.yaml        # `kubectl top` and HPA metrics
@@ -62,6 +64,7 @@ make start
 | **Prometheus** | `make prometheus-open`                        | Metrics and alert rules at `localhost:9090`              |
 | **Alertmanager** | `make alertmanager-open`                    | Firing alerts at `localhost:9093`                        |
 | **RustFS**   | `make rustfs-open`                              | Object storage console at `localhost:9001` (prints keys) |
+| **Vault**    | `make vault-open`                               | Secrets UI at `localhost:8200` (prints the root token)   |
 
 ### Daily Development Workflow
 
@@ -326,20 +329,7 @@ Things to know:
   kubectl run np-test --rm -i --restart=Never --image=busybox:1.36 --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"np-test","image":"busybox:1.36","command":["nc","-zv","-w","3","mysql","3306"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
   ```
 
-* **Secrets** never live in the manifests. `make deploy-apps` first runs `make deploy-app-secrets`, which creates three
-  Secrets once, with random values, and keeps them afterwards: `auth-service-app` (Laravel's `APP_KEY`), `mysql-root`
-  and `mysql-app-user` (the `app` user auth-service connects as, limited to `app_db`). To read one:
-
-  ```bash
-  kubectl get secret mysql-app-user -o jsonpath='{.data.password}' | base64 --decode
-  ```
-
-  MySQL applies these credentials only when it initializes an empty data directory. After changing them, run
-  `ALTER USER` in MySQL, or start the database from scratch (this deletes its data):
-
-  ```bash
-  kubectl delete deployment mysql && kubectl delete pvc mysql-data && make deploy-apps
-  ```
+* **Secrets** never live in the manifests. They come from Vault; see "Secrets (Vault)" below.
 
 * **Pod Security** is enforced at `restricted` in `default`, so every pod there must run as non-root with all
   capabilities dropped, no privilege escalation and a seccomp profile. A plain `kubectl run` debug pod is rejected; give
@@ -347,6 +337,49 @@ Things to know:
 
 * **VPA (optional):** `make deploy-vpa` installs the VPA recommender and recommendation-only VPAs for the three apps,
   and `make clean-vpa` removes them. See `infrastructure/k8s/optional/vpa/README.md`.
+
+### Secrets (Vault)
+
+The app secrets live in HashiCorp Vault, in the `vault` namespace (Pod Security `restricted`). The Vault Secrets
+Operator copies them into the Kubernetes Secrets the Deployments read, and checks Vault for changes every minute.
+
+| Vault path                    | Kubernetes Secret  | Used by                                   |
+|:------------------------------|:-------------------|:------------------------------------------|
+| `secret/auth-service/app`     | `auth-service-app` | auth-service (`APP_KEY`)                  |
+| `secret/mysql/app-user`       | `mysql-app-user`   | MySQL creates it; auth-service logs in as it (`app_db` only) |
+| `secret/mysql/root`           | `mysql-root`       | MySQL                                     |
+
+Each app logs in to Vault with its own ServiceAccount, and its Vault policy only lets it read its own paths. For
+example, auth-service can't read the MySQL root password.
+
+`make start` runs `make deploy-vault` and `make vault-setup`. On its first run `vault-setup` initializes Vault and saves
+its unseal key and root token to `.vault/init.json` (git-ignored). **Keep that file**: without it a sealed Vault can't
+be opened. Every run then unseals Vault, applies its auth config and policies, and seeds the three secrets with random
+values if they don't exist yet. It never overwrites them.
+
+* **After a cluster or Vault restart** Vault comes back sealed. The apps keep running on their existing Secrets, but
+  changes in Vault don't sync until you run `make vault-unseal`.
+* **To view or change a secret**, open the UI with `make vault-open` (it prints the root token) at
+  [http://localhost:8200](http://localhost:8200). A new `APP_KEY` or `mysql/app-user` value restarts auth-service
+  within about a minute. To read the synced value from Kubernetes:
+
+  ```bash
+  kubectl get secret mysql-app-user -o jsonpath='{.data.password}' | base64 --decode
+  ```
+
+* **MySQL reads its credentials only when it initializes an empty data directory.** After changing a MySQL password in
+  Vault, also run `ALTER USER` in MySQL, or start the database from scratch (this deletes its data):
+
+  ```bash
+  kubectl delete deployment mysql && kubectl delete pvc mysql-data && make deploy-apps
+  ```
+
+* **If `.vault/init.json` is lost**, the only way back is a new Vault. Run `helm uninstall vault -n vault`, then
+  `kubectl delete pvc data-vault-0 -n vault`, then `make deploy-vault vault-setup`. The new Vault re-seeds from the
+  Kubernetes Secrets that still exist, so the apps keep their values.
+
+This setup is for a local cluster only. It uses one unseal key, keeps the root token in a local file, turns TLS off
+inside the cluster, and turns mlock off (Pod Security `restricted` drops the `IPC_LOCK` capability it needs).
 
 ### Troubleshooting
 
@@ -366,7 +399,8 @@ Things to know:
 
 ### Cleanup
 
-* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server. Also
-  deletes MySQL's `mysql-data` PVC, which wipes the database. Keeps the app Secrets, so a fresh MySQL gets the same
-  credentials, and the RustFS data PVC and its credentials Secret; see "Log storage (RustFS)").
+* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack, metrics-server, Vault and the
+  Vault Secrets Operator. Also deletes MySQL's `mysql-data` PVC, which wipes the database. Keeps Vault's data PVC
+  `data-vault-0` and `.vault/init.json`, so the app secrets survive and a fresh MySQL gets the same credentials. Also
+  keeps the RustFS data PVC and its credentials Secret; see "Log storage (RustFS)").
 * **Full Prune:** `make prune` (Runs `make clean`, then prunes all unused Docker images, containers, volumes and networks).

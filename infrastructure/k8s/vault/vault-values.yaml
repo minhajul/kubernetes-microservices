@@ -1,0 +1,55 @@
+# HashiCorp Vault: one server holding the app secrets (APP_KEY, MySQL credentials).
+# Local-cluster setup: file storage on a PVC, no TLS inside the cluster, and a single
+# unseal key kept in .vault/init.json by setup.sh. Not a production configuration.
+global:
+  tlsDisable: true
+
+# Secrets reach the apps through the Vault Secrets Operator, not the agent sidecar.
+injector:
+  enabled: false
+
+server:
+  standalone:
+    enabled: true
+    config: |-
+      ui = true
+
+      # Pod Security "restricted" drops the IPC_LOCK capability that mlock needs, so
+      # pages holding secrets could be swapped to disk. Acceptable on a local cluster.
+      disable_mlock = true
+
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+
+      storage "file" {
+        path = "/vault/data"
+      }
+
+  dataStorage:
+    enabled: true
+    size: 1Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  # The chart's defaults run as non-root but miss what "restricted" also requires.
+  statefulSet:
+    securityContext:
+      pod:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      container:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

@@ -1,1 +1,3 @@
 .idea
+# Vault unseal key and root token, written by make vault-setup
+.vault/

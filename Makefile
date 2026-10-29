@@ -15,7 +15,13 @@ RUSTFS_VERSION := 1.0.4
 # Optional VPA recommender (make deploy-vpa). Not part of deploy-infra or the playbook.
 VPA_VERSION := 0.15.0
 
-.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-app-secrets deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open
+# Vault and the Vault Secrets Operator (make deploy-vault). Not part of deploy-infra or the playbook.
+VAULT_NS := vault
+VAULT_VALUES := infrastructure/k8s/vault
+VAULT_VERSION := 0.34.1
+VAULT_SECRETS_OPERATOR_VERSION := 1.6.2
+
+.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-vault vault-setup vault-unseal deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open vault-open
 
 # 1. Build Docker Images Locally
 build:
@@ -118,23 +124,39 @@ deploy-metrics-server:
 			-f $(OBSERVABILITY_VALUES)/metrics-server-values.yaml; \
 	fi
 
-# App credentials, never committed: Laravel's APP_KEY, the MySQL root password and the app's
-# own MySQL user. Each Secret is created once with random values and kept on later runs.
-# MySQL applies its credentials only when it initializes an empty data dir (see README).
-deploy-app-secrets:
-	@kubectl get secret auth-service-app >/dev/null 2>&1 || \
-		kubectl create secret generic auth-service-app \
-			--from-literal=APP_KEY="base64:$$(openssl rand -base64 32)"
-	@kubectl get secret mysql-root >/dev/null 2>&1 || \
-		kubectl create secret generic mysql-root \
-			--from-literal=password="$$(openssl rand -hex 16)"
-	@kubectl get secret mysql-app-user >/dev/null 2>&1 || \
-		kubectl create secret generic mysql-app-user \
-			--from-literal=username=app \
-			--from-literal=password="$$(openssl rand -hex 16)"
+# Vault holds the app secrets (Laravel's APP_KEY, the MySQL root password and the app's own
+# MySQL user). The Vault Secrets Operator copies them into the Kubernetes Secrets the apps
+# read. Both run in the vault namespace, which enforces Pod Security restricted. Vault's
+# pod only turns Ready once vault-setup has initialized and unsealed it, so no --wait here.
+deploy-vault:
+	kubectl create namespace $(VAULT_NS) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl label namespace $(VAULT_NS) --overwrite \
+		pod-security.kubernetes.io/enforce=restricted \
+		pod-security.kubernetes.io/warn=restricted \
+		pod-security.kubernetes.io/audit=restricted
+	helm repo add hashicorp https://helm.releases.hashicorp.com
+	helm repo update hashicorp
+	helm upgrade --install vault hashicorp/vault \
+		--version $(VAULT_VERSION) \
+		--namespace $(VAULT_NS) \
+		-f $(VAULT_VALUES)/vault-values.yaml
+	helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator \
+		--version $(VAULT_SECRETS_OPERATOR_VERSION) \
+		--namespace $(VAULT_NS) \
+		--wait \
+		-f $(VAULT_VALUES)/vault-secrets-operator-values.yaml
 
-# 4. Deploy Your Apps (and MySQL)
-deploy-apps: deploy-app-secrets
+# Initializes Vault (first run), unseals it, configures its auth and policies, and seeds the
+# app secrets once. The unseal key and root token go to .vault/init.json (git-ignored): keep it.
+vault-setup:
+	$(VAULT_VALUES)/setup.sh
+
+# Vault seals itself whenever its pod restarts, e.g. after the cluster restarts.
+vault-unseal:
+	$(VAULT_VALUES)/setup.sh unseal
+
+# 4. Deploy Your Apps (and MySQL). Their Secrets come from Vault.
+deploy-apps: vault-setup
 	@echo "Deploying Applications..."
 	kubectl apply -f infrastructure/k8s/apps/
 	# Force restart to pick up new image builds if tags didn't change
@@ -161,7 +183,7 @@ clean-vpa:
 	helm uninstall vpa -n kube-system || true
 
 # 5. Master Command
-start: build deploy-infra deploy-apps
+start: build deploy-infra deploy-vault deploy-apps
 	@echo "Done! Frontend should be available at http://localhost"
 
 # 6. Access Grafana
@@ -184,6 +206,11 @@ rustfs-open:
 	@echo "Secret key: $$(kubectl get secret rustfs-credentials -n $(OBSERVABILITY_NS) -o jsonpath='{.data.RUSTFS_SECRET_KEY}' | base64 --decode)"
 	kubectl port-forward svc/rustfs-svc -n $(OBSERVABILITY_NS) 9001:9001
 
+# Vault UI at http://localhost:8200 (sign in with the root token)
+vault-open:
+	@echo "Root token: $$(sed -n 's/.*"root_token": *"\([^"]*\)".*/\1/p' .vault/init.json)"
+	kubectl port-forward svc/vault -n $(VAULT_NS) 8200:8200
+
 clean:
 	@echo "Stopping and deleting Kubernetes resources..."
 	kubectl delete -f infrastructure/k8s/apps/ || true
@@ -195,6 +222,8 @@ clean:
 	helm uninstall kube-prometheus-stack -n $(OBSERVABILITY_NS) || true
 	helm uninstall rustfs -n $(OBSERVABILITY_NS) || true
 	helm uninstall metrics-server -n kube-system || true
+	helm uninstall vault-secrets-operator -n $(VAULT_NS) || true
+	helm uninstall vault -n $(VAULT_NS) || true
 	@echo "Removing Docker images..."
 	docker rmi auth-service:latest frontend:latest || true
 	@echo "Cleanup complete!"
