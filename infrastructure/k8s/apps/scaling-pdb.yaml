@@ -1,0 +1,25 @@
+# maxUnavailable: 1 lets a drain evict one pod at a time. At 1 replica it allows that
+# pod to go, so it never blocks a drain. mysql has no PDB: it is a single instance,
+# and any budget that protected it would block every drain.
+# AlwaysAllow lets a drain evict pods that are not Ready (e.g. crash-looping).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-service
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: auth-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+spec:
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  selector:
+    matchLabels:
+      app: frontend

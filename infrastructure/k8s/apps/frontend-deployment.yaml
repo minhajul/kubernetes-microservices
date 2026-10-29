@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: frontend
 spec:
-  replicas: 1
+  # No replicas here: the HPA in scaling-hpa.yaml owns the count (min 1, max 3).
   selector:
     matchLabels:
       app: frontend
@@ -12,6 +12,14 @@ spec:
       labels:
         app: frontend
     spec:
+      serviceAccountName: frontend  # Created by security-service-accounts.yaml
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000              # "node" user in node:22-alpine
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: frontend
           image: frontend:latest
@@ -23,6 +31,35 @@ spec:
               value: "http://frontend-service"
           ports:
             - containerPort: 3000
+          # "/" is prerendered at build time (client component, no server-side fetch),
+          # so it returns 200 without calling auth-service.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
 ---
 apiVersion: v1
 kind: Service

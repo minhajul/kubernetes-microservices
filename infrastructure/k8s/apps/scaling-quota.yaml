@@ -1,0 +1,36 @@
+# Namespace guardrails for the apps namespace (whichever namespace these manifests are
+# applied to). The LimitRange comes first so its defaults exist before the quota starts
+# requiring requests/limits on every new pod.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: apps-limits
+spec:
+  limits:
+    - type: Container
+      defaultRequest:          # For containers that set no requests (e.g. kubectl run debug pods)
+        cpu: 50m
+        memory: 64Mi
+      default:                 # For containers that set no limits
+        cpu: 250m
+        memory: 256Mi
+      max:
+        cpu: "2"
+        memory: 2Gi
+---
+# Worst case is every HPA at maxReplicas plus one rolling-update surge pod each
+# (mysql uses Recreate, so no surge):
+#   requests: auth 5 x 100m/128Mi + frontend 4 x 100m/256Mi + mysql 250m/512Mi = 1150m / 2176Mi
+#   limits:   auth 5 x 500m/256Mi + frontend 4 x 500m/512Mi + mysql 1/1Gi     = 5500m / 4352Mi
+# The quota leaves headroom on top of that for debug pods and terminating pods.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: apps-quota
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 3Gi
+    limits.cpu: "8"
+    limits.memory: 6Gi
+    pods: "20"
