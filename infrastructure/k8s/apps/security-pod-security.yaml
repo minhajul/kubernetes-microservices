@@ -3,19 +3,18 @@
 # namespace, which is "default". Applying this adds the labels to the existing
 # namespace; "kubectl delete -f" cannot remove it (default is protected).
 #
-# enforce=baseline: rejects privileged pods, hostPath/hostNetwork/hostPID,
-#   host ports and added capabilities outside the baseline set.
-# warn/audit=restricted: reports, without rejecting, every gap to the
-#   restricted profile. The official mysql:8.0 image starts as root and drops
-#   to uid 999 with gosu, so restricted (runAsNonRoot, drop ALL) rejects it
-#   unless the pod pins runAsUser 999. Raise enforce to restricted once
-#   "kubectl apply" prints no PodSecurity warnings for this namespace.
+# enforce=restricted: every pod must run as non-root, drop ALL capabilities,
+#   disallow privilege escalation and use a seccomp profile. All three apps set
+#   this in their securityContext (mysql pins runAsUser 999, the image's own
+#   mysql user, so it never starts as root). Debug pods from a plain
+#   "kubectl run" are rejected here: give them the same securityContext (see the
+#   README's NetworkPolicy check) or run them in another namespace.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: default
   labels:
-    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/warn: restricted
     pod-security.kubernetes.io/warn-version: latest

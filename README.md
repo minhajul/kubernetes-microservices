@@ -307,8 +307,7 @@ Besides the three Deployments, `infrastructure/k8s/apps/` holds:
 
 * `scaling-*.yaml`: HPAs (auth-service 2–4 pods, frontend 1–3, both at 70% CPU), PodDisruptionBudgets, and a
   ResourceQuota and LimitRange for the `default` namespace.
-* `security-*.yaml`: NetworkPolicies, Pod Security labels (`enforce=baseline`, `warn`/`audit=restricted`) and one
-  ServiceAccount per app.
+* `security-*.yaml`: NetworkPolicies, Pod Security labels (`enforce=restricted`) and one ServiceAccount per app.
 
 Things to know:
 
@@ -324,8 +323,12 @@ Things to know:
   check after `make deploy-apps` (a timeout means enforced, `open` means not):
 
   ```bash
-  kubectl run np-test --rm -it --restart=Never --image=busybox:1.36 -- nc -zv -w 3 mysql 3306
+  kubectl run np-test --rm -i --restart=Never --image=busybox:1.36 --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"np-test","image":"busybox:1.36","command":["nc","-zv","-w","3","mysql","3306"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
   ```
+
+* **Pod Security** is enforced at `restricted` in `default`, so every pod there must run as non-root with all
+  capabilities dropped, no privilege escalation and a seccomp profile. A plain `kubectl run` debug pod is rejected; give
+  it a `securityContext` like the command above, or run it in another namespace.
 
 * **VPA (optional):** `make deploy-vpa` installs the VPA recommender and recommendation-only VPAs for the three apps,
   and `make clean-vpa` removes them. See `infrastructure/k8s/optional/vpa/README.md`.

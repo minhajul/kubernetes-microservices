@@ -70,7 +70,7 @@ spec:
             - name: APP_KEY
               value: "base64:zmRo5jo2BqnWlVLnqbCy7XBq+sVEtIb6TigyzWmymuk="
             - name: APP_DEBUG
-              value: "true"
+              value: "false"             # Debug error pages show env vars, including DB credentials
             - name: DB_CONNECTION
               value: "mysql"
             - name: DB_HOST

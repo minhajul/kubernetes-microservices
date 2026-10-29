@@ -5,6 +5,11 @@ loki:
   commonConfig:
     replication_factor: 1
     path_prefix: /var/loki
+  # Merged into the chart's non-root defaults. The seccomp profile is the one thing
+  # Pod Security "restricted" still flagged (it covers the loki-sc-rules sidecar too).
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
   # Chunks and ruler data go to RustFS (rustfs-values.yaml). The keys are expanded
   # from the environment at startup (-config.expand-env below), so they never
   # appear in the rendered ConfigMap.
@@ -55,6 +60,9 @@ backend:
   replicas: 0
 gateway:
   replicas: 0
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
 
 # Keep it light for a local cluster: the memcached chunks cache requests ~9.6Gi of
 # memory by default, more than the whole node has, so it would stay Pending.
