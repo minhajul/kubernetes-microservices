@@ -1,0 +1,30 @@
+# Docker
+Dockerfile
+.dockerignore
+
+# VCS, editor and AI tooling
+.git
+.github
+.idea
+.vscode
+.next-docs
+AGENTS.md
+CLAUDE.md
+README.md
+.DS_Store
+
+# Local env files. NEXT_PUBLIC_API_URL comes from the build arg instead.
+.env*
+
+# Dependencies and build output (installed / built fresh in the image)
+node_modules
+.next
+out
+build
+coverage
+*.tsbuildinfo
+next-env.d.ts
+.vercel
+
+# Logs
+*.log
