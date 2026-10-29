@@ -58,11 +58,9 @@ write:
   replicas: 0
 backend:
   replicas: 0
+# Nothing uses the gateway: Grafana and Fluent Bit talk to loki:3100 directly.
 gateway:
-  replicas: 0
-  podSecurityContext:
-    seccompProfile:
-      type: RuntimeDefault
+  enabled: false
 
 # Keep it light for a local cluster: the memcached chunks cache requests ~9.6Gi of
 # memory by default, more than the whole node has, so it would stay Pending.

@@ -184,8 +184,8 @@ prometheus:
         matchLabels:
           app.kubernetes.io/name: loki
           app.kubernetes.io/instance: loki
-        # Skips loki-headless and loki-gateway, which the chart labels this way
-        # so the same pods aren't scraped twice.
+        # Skips loki-headless, which the chart labels this way so the same pods
+        # aren't scraped twice.
         matchExpressions:
           - key: prometheus.io/service-monitor
             operator: NotIn

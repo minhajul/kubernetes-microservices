@@ -21,7 +21,17 @@ VAULT_VALUES := infrastructure/k8s/vault
 VAULT_VERSION := 0.34.1
 VAULT_SECRETS_OPERATOR_VERSION := 1.6.2
 
-.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-vault vault-setup vault-unseal deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open vault-open
+.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-vault-namespace deploy-vault vault-setup deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open vault-open
+
+# Creates namespace $(1) if it's missing and sets its Pod Security enforce level to $(2).
+# warn and audit are always restricted, so every gap to restricted still gets reported.
+define ensure-namespace
+kubectl create namespace $(1) --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace $(1) --overwrite \
+	pod-security.kubernetes.io/enforce=$(2) \
+	pod-security.kubernetes.io/warn=restricted \
+	pod-security.kubernetes.io/audit=restricted
+endef
 
 # 1. Build Docker Images Locally
 build:
@@ -82,11 +92,7 @@ deploy-infra: deploy-metrics-server deploy-rustfs-secret
 
 # Namespace: node-exporter and Fluent Bit need host access, so don't enforce baseline
 deploy-monitoring-namespace:
-	kubectl create namespace $(OBSERVABILITY_NS) --dry-run=client -o yaml | kubectl apply -f -
-	kubectl label namespace $(OBSERVABILITY_NS) --overwrite \
-		pod-security.kubernetes.io/enforce=privileged \
-		pod-security.kubernetes.io/warn=restricted \
-		pod-security.kubernetes.io/audit=restricted
+	$(call ensure-namespace,$(OBSERVABILITY_NS),privileged)
 
 # RustFS root credentials, also used by Loki. Pass RUSTFS_ACCESS_KEY and RUSTFS_SECRET_KEY
 # (environment or make variables) to set them. Otherwise an existing Secret is kept, or
@@ -124,16 +130,14 @@ deploy-metrics-server:
 			-f $(OBSERVABILITY_VALUES)/metrics-server-values.yaml; \
 	fi
 
+deploy-vault-namespace:
+	$(call ensure-namespace,$(VAULT_NS),restricted)
+
 # Vault holds the app secrets (Laravel's APP_KEY, the MySQL root password and the app's own
 # MySQL user). The Vault Secrets Operator copies them into the Kubernetes Secrets the apps
-# read. Both run in the vault namespace, which enforces Pod Security restricted. Vault's
-# pod only turns Ready once vault-setup has initialized and unsealed it, so no --wait here.
-deploy-vault:
-	kubectl create namespace $(VAULT_NS) --dry-run=client -o yaml | kubectl apply -f -
-	kubectl label namespace $(VAULT_NS) --overwrite \
-		pod-security.kubernetes.io/enforce=restricted \
-		pod-security.kubernetes.io/warn=restricted \
-		pod-security.kubernetes.io/audit=restricted
+# read. setup.sh then initializes, unseals and configures Vault; its pod only turns Ready
+# once that's done, so the Vault install has no --wait.
+deploy-vault: deploy-vault-namespace
 	helm repo add hashicorp https://helm.releases.hashicorp.com
 	helm repo update hashicorp
 	helm upgrade --install vault hashicorp/vault \
@@ -145,18 +149,14 @@ deploy-vault:
 		--namespace $(VAULT_NS) \
 		--wait \
 		-f $(VAULT_VALUES)/vault-secrets-operator-values.yaml
+	VAULT_NS=$(VAULT_NS) $(VAULT_VALUES)/setup.sh
 
-# Initializes Vault (first run), unseals it, configures its auth and policies, and seeds the
-# app secrets once. The unseal key and root token go to .vault/init.json (git-ignored): keep it.
+# Re-runs Vault's setup (see setup.sh), e.g. to unseal Vault after a cluster restart.
 vault-setup:
-	$(VAULT_VALUES)/setup.sh
+	VAULT_NS=$(VAULT_NS) $(VAULT_VALUES)/setup.sh
 
-# Vault seals itself whenever its pod restarts, e.g. after the cluster restarts.
-vault-unseal:
-	$(VAULT_VALUES)/setup.sh unseal
-
-# 4. Deploy Your Apps (and MySQL). Their Secrets come from Vault.
-deploy-apps: vault-setup
+# 4. Deploy Your Apps (and MySQL). Their Secrets come from Vault (make deploy-vault).
+deploy-apps:
 	@echo "Deploying Applications..."
 	kubectl apply -f infrastructure/k8s/apps/
 	# Force restart to pick up new image builds if tags didn't change
@@ -208,7 +208,7 @@ rustfs-open:
 
 # Vault UI at http://localhost:8200 (sign in with the root token)
 vault-open:
-	@echo "Root token: $$(sed -n 's/.*"root_token": *"\([^"]*\)".*/\1/p' .vault/init.json)"
+	@echo "Root token: $$($(VAULT_VALUES)/setup.sh root-token)"
 	kubectl port-forward svc/vault -n $(VAULT_NS) 8200:8200
 
 clean:

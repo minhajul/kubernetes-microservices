@@ -22,7 +22,6 @@ kubernetes-microservices/
         ├── apps/                  # Deployments (Auth, Frontend, MySQL), scaling-*.yaml, security-*.yaml
         ├── optional/vpa/          # Recommendation-only VPA (`make deploy-vpa`)
         ├── vault/                 # Vault and Vault Secrets Operator values, setup.sh
-
         └── observability/         # Helm values for the monitoring stack
             ├── kube-prometheus-stack-values.yaml # Prometheus, Alertmanager, alert rules
             ├── metrics-server-values.yaml        # `kubectl top` and HPA metrics
@@ -349,16 +348,17 @@ Operator copies them into the Kubernetes Secrets the Deployments read, and check
 | `secret/mysql/app-user`       | `mysql-app-user`   | MySQL creates it; auth-service logs in as it (`app_db` only) |
 | `secret/mysql/root`           | `mysql-root`       | MySQL                                     |
 
-Each app logs in to Vault with its own ServiceAccount, and its Vault policy only lets it read its own paths. For
-example, auth-service can't read the MySQL root password.
+Each app logs in to Vault with its own ServiceAccount, and its Vault policy only lets it read the paths its Secrets
+sync from. For example, auth-service can't read the MySQL root password.
 
-`make start` runs `make deploy-vault` and `make vault-setup`. On its first run `vault-setup` initializes Vault and saves
-its unseal key and root token to `.vault/init.json` (git-ignored). **Keep that file**: without it a sealed Vault can't
-be opened. Every run then unseals Vault, applies its auth config and policies, and seeds the three secrets with random
-values if they don't exist yet. It never overwrites them.
+`make start` runs `make deploy-vault`, which installs Vault and the operator and then runs
+`infrastructure/k8s/vault/setup.sh`. On its first run the script initializes Vault and saves its unseal key and root
+token to `.vault/init.json` (git-ignored). **Keep that file**: without it a sealed Vault can't be opened. Every run
+then unseals Vault, applies its auth config and policies, and seeds the three secrets with random values if they don't
+exist yet. It never overwrites them. `make vault-setup` re-runs just the script.
 
 * **After a cluster or Vault restart** Vault comes back sealed. The apps keep running on their existing Secrets, but
-  changes in Vault don't sync until you run `make vault-unseal`.
+  changes in Vault don't sync until you run `make vault-setup`.
 * **To view or change a secret**, open the UI with `make vault-open` (it prints the root token) at
   [http://localhost:8200](http://localhost:8200). A new `APP_KEY` or `mysql/app-user` value restarts auth-service
   within about a minute. To read the synced value from Kubernetes:
@@ -375,7 +375,7 @@ values if they don't exist yet. It never overwrites them.
   ```
 
 * **If `.vault/init.json` is lost**, the only way back is a new Vault. Run `helm uninstall vault -n vault`, then
-  `kubectl delete pvc data-vault-0 -n vault`, then `make deploy-vault vault-setup`. The new Vault re-seeds from the
+  `kubectl delete pvc data-vault-0 -n vault`, then `make deploy-vault`. The new Vault re-seeds from the
   Kubernetes Secrets that still exist, so the apps keep their values.
 
 This setup is for a local cluster only. It uses one unseal key, keeps the root token in a local file, turns TLS off

@@ -1,8 +1,6 @@
 # HashiCorp Vault: one server holding the app secrets (APP_KEY, MySQL credentials).
 # Local-cluster setup: file storage on a PVC, no TLS inside the cluster, and a single
 # unseal key kept in .vault/init.json by setup.sh. Not a production configuration.
-global:
-  tlsDisable: true
 
 # Secrets reach the apps through the Vault Secrets Operator, not the agent sidecar.
 injector:
@@ -10,7 +8,6 @@ injector:
 
 server:
   standalone:
-    enabled: true
     config: |-
       ui = true
 
@@ -29,8 +26,12 @@ server:
       }
 
   dataStorage:
-    enabled: true
     size: 1Gi
+
+  # An HTTP check instead of the chart's default `vault status` exec, which spawned a
+  # process every 5s. It still fails while Vault is uninitialized (501) or sealed (503).
+  readinessProbe:
+    path: "/v1/sys/health?standbyok=true"
 
   resources:
     requests:
