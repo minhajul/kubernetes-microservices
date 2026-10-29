@@ -24,7 +24,20 @@ spec:
         - name: migration
           image: auth-service:latest
           imagePullPolicy: IfNotPresent
-          command: ["php", "artisan", "migrate", "--force"]
+          # On a fresh deploy MySQL refuses connections until its first-boot init finishes,
+          # so wait for it (up to 5 minutes, like its startupProbe) instead of crash-looping.
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until php -r 'new PDO("mysql:host=" . getenv("DB_HOST") . ";port=" . getenv("DB_PORT"), getenv("DB_USERNAME"), getenv("DB_PASSWORD"));' >/dev/null 2>&1; do
+                i=$((i + 1))
+                if [ "$i" -ge 150 ]; then echo "MySQL at $DB_HOST:$DB_PORT is still not accepting connections"; exit 1; fi
+                echo "Waiting for MySQL at $DB_HOST:$DB_PORT..."
+                sleep 2
+              done
+              exec php artisan migrate --force
           env:
             - name: DB_CONNECTION
               value: "mysql"
