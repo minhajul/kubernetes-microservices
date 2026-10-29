@@ -1,0 +1,56 @@
+# Docker
+Dockerfile
+.dockerignore
+
+# VCS, editor and AI tooling
+.git
+.github
+.idea
+.vscode
+.fleet
+.nova
+.zed
+.agents
+.claude
+.gemini
+.mcp.json
+boost.json
+CLAUDE.md
+GEMINI.md
+README.md
+.editorconfig
+.DS_Store
+
+# Local environment and credentials (configuration comes from the container env)
+.env
+.env.*
+auth.json
+
+# Dependencies and build output (installed fresh in the image)
+vendor
+node_modules
+public/build
+public/hot
+public/storage
+
+# Runtime state from local runs. bootstrap/cache must not leak a dev package
+# manifest that references dev-only service providers.
+bootstrap/cache/*.php
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/testing/*
+storage/framework/views/*
+storage/app/private/*
+storage/app/public/*
+storage/pail
+storage/*.key
+database/*.sqlite*
+*.log
+
+# Tests and dev tooling
+tests
+phpunit.xml
+pint.json
+.phpunit.cache
+.phpunit.result.cache
