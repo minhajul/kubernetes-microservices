@@ -326,6 +326,21 @@ Things to know:
   kubectl run np-test --rm -i --restart=Never --image=busybox:1.36 --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"np-test","image":"busybox:1.36","command":["nc","-zv","-w","3","mysql","3306"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
   ```
 
+* **Secrets** never live in the manifests. `make deploy-apps` first runs `make deploy-app-secrets`, which creates three
+  Secrets once, with random values, and keeps them afterwards: `auth-service-app` (Laravel's `APP_KEY`), `mysql-root`
+  and `mysql-app-user` (the `app` user auth-service connects as, limited to `app_db`). To read one:
+
+  ```bash
+  kubectl get secret mysql-app-user -o jsonpath='{.data.password}' | base64 --decode
+  ```
+
+  MySQL applies these credentials only when it initializes an empty data directory. After changing them, run
+  `ALTER USER` in MySQL, or start the database from scratch (this deletes its data):
+
+  ```bash
+  kubectl delete deployment mysql && kubectl delete pvc mysql-data && make deploy-apps
+  ```
+
 * **Pod Security** is enforced at `restricted` in `default`, so every pod there must run as non-root with all
   capabilities dropped, no privilege escalation and a seccomp profile. A plain `kubectl run` debug pod is rejected; give
   it a `securityContext` like the command above, or run it in another namespace.
@@ -352,6 +367,6 @@ Things to know:
 ### Cleanup
 
 * **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server. Also
-  deletes MySQL's `mysql-data` PVC, which wipes the database. Keeps the RustFS data PVC and its credentials Secret;
-  see "Log storage (RustFS)").
+  deletes MySQL's `mysql-data` PVC, which wipes the database. Keeps the app Secrets, so a fresh MySQL gets the same
+  credentials, and the RustFS data PVC and its credentials Secret; see "Log storage (RustFS)").
 * **Full Prune:** `make prune` (Runs `make clean`, then prunes all unused Docker images, containers, volumes and networks).

@@ -15,7 +15,7 @@ RUSTFS_VERSION := 1.0.4
 # Optional VPA recommender (make deploy-vpa). Not part of deploy-infra or the playbook.
 VPA_VERSION := 0.15.0
 
-.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open
+.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-app-secrets deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open
 
 # 1. Build Docker Images Locally
 build:
@@ -118,8 +118,23 @@ deploy-metrics-server:
 			-f $(OBSERVABILITY_VALUES)/metrics-server-values.yaml; \
 	fi
 
+# App credentials, never committed: Laravel's APP_KEY, the MySQL root password and the app's
+# own MySQL user. Each Secret is created once with random values and kept on later runs.
+# MySQL applies its credentials only when it initializes an empty data dir (see README).
+deploy-app-secrets:
+	@kubectl get secret auth-service-app >/dev/null 2>&1 || \
+		kubectl create secret generic auth-service-app \
+			--from-literal=APP_KEY="base64:$$(openssl rand -base64 32)"
+	@kubectl get secret mysql-root >/dev/null 2>&1 || \
+		kubectl create secret generic mysql-root \
+			--from-literal=password="$$(openssl rand -hex 16)"
+	@kubectl get secret mysql-app-user >/dev/null 2>&1 || \
+		kubectl create secret generic mysql-app-user \
+			--from-literal=username=app \
+			--from-literal=password="$$(openssl rand -hex 16)"
+
 # 4. Deploy Your Apps (and MySQL)
-deploy-apps:
+deploy-apps: deploy-app-secrets
 	@echo "Deploying Applications..."
 	kubectl apply -f infrastructure/k8s/apps/
 	# Force restart to pick up new image builds if tags didn't change

@@ -47,10 +47,17 @@ spec:
               value: "3306"
             - name: DB_DATABASE
               value: "app_db"
+            # The app's own MySQL user, which only has access to app_db (see mysql-deployment.yaml).
             - name: DB_USERNAME
-              value: "root"
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-app-user
+                  key: username
             - name: DB_PASSWORD
-              value: "secret"
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-app-user
+                  key: password
           resources:
             requests:
               cpu: 50m
@@ -67,8 +74,12 @@ spec:
           image: auth-service:latest
           imagePullPolicy: IfNotPresent  # <--- CRITICAL FOR LOCAL DEV
           env:
+            # Secrets are created by `make deploy-app-secrets`, never committed.
             - name: APP_KEY
-              value: "base64:zmRo5jo2BqnWlVLnqbCy7XBq+sVEtIb6TigyzWmymuk="
+              valueFrom:
+                secretKeyRef:
+                  name: auth-service-app
+                  key: APP_KEY
             - name: APP_DEBUG
               value: "false"             # Debug error pages show env vars, including DB credentials
             - name: DB_CONNECTION
@@ -80,9 +91,15 @@ spec:
             - name: DB_DATABASE
               value: "app_db"
             - name: DB_USERNAME
-              value: "root"
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-app-user
+                  key: username
             - name: DB_PASSWORD
-              value: "secret"
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-app-user
+                  key: password
             - name: LOG_CHANNEL
               value: "stderr"            # Send logs to FluentBit
           ports:

@@ -52,11 +52,28 @@ spec:
       containers:
         - name: mysql
           image: mysql:8.0
+          # Secrets are created by `make deploy-app-secrets`, never committed. The image only
+          # applies them when it initializes an empty data directory: it sets the root
+          # password and creates the app user with full access to app_db only. Changing them
+          # later needs ALTER USER, or a fresh mysql-data PVC.
           env:
             - name: MYSQL_ROOT_PASSWORD
-              value: "secret"
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-root
+                  key: password
             - name: MYSQL_DATABASE
               value: "app_db"
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-app-user
+                  key: username
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-app-user
+                  key: password
           ports:
             - containerPort: 3306
           volumeMounts:
