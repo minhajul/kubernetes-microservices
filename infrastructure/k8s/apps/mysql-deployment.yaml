@@ -13,6 +13,8 @@ kind: Deployment
 metadata:
   name: mysql
 spec:
+  strategy:
+    type: Recreate          # Single instance: never run two mysqld on the same data dir
   selector:
     matchLabels:
       app: mysql
@@ -21,6 +23,18 @@ spec:
       labels:
         app: mysql
     spec:
+      automountServiceAccountToken: false
+      # The official image starts as root only to chown its dirs and then drops to its
+      # "mysql" user (999). The image already owns /var/lib/mysql and /var/run/mysqld as
+      # 999 (mode 1777), so starting as 999 skips that root step. fsGroup makes a PVC
+      # mounted at /var/lib/mysql later writable too.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mysql
           image: mysql:8.0
@@ -31,3 +45,35 @@ spec:
               value: "app_db"
           ports:
             - containerPort: 3306
+          # First boot initialises the data dir on a socket-only temporary server,
+          # which can take minutes on a laptop. Ping over TCP so that phase doesn't count.
+          # All probes run inside the container, so NetworkPolicies on 3306 can't affect them.
+          startupProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30     # Up to 5 minutes
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

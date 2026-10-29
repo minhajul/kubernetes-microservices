@@ -1,0 +1,71 @@
+# Recommendation-only VPAs (updateMode "Off"): the recommender publishes suggested
+# requests in .status, but nothing evicts or resizes pods. Needs the VPA CRDs and
+# recommender, see README.md. maxAllowed matches the LimitRange max in
+# ../../apps/scaling-quota.yaml.
+# If you ever switch auth-service or frontend away from "Off", drop cpu from
+# controlledResources: their HPAs already scale on CPU and the two would fight.
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: auth-service
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: auth-service
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"
+        controlledResources: ["cpu", "memory"]
+        minAllowed:
+          cpu: 25m
+          memory: 64Mi
+        maxAllowed:
+          cpu: "2"
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: frontend
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: frontend
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"
+        controlledResources: ["cpu", "memory"]
+        minAllowed:
+          cpu: 25m
+          memory: 64Mi
+        maxAllowed:
+          cpu: "2"
+          memory: 2Gi
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: mysql
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mysql
+  updatePolicy:
+    updateMode: "Off"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: "*"
+        controlledResources: ["cpu", "memory"]
+        minAllowed:
+          cpu: 50m
+          memory: 256Mi
+        maxAllowed:
+          cpu: "2"
+          memory: 2Gi

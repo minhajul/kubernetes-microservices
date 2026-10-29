@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: auth-service
 spec:
-  replicas: 2
+  # No replicas here: the HPA in scaling-hpa.yaml owns the count (min 2, max 4).
   selector:
     matchLabels:
       app: auth-service
@@ -12,6 +12,13 @@ spec:
       labels:
         app: auth-service
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000              # Non-root user baked into the auth-service image
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: migration
           image: auth-service:latest
@@ -30,6 +37,17 @@ spec:
               value: "root"
             - name: DB_PASSWORD
               value: "secret"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: auth-service
           image: auth-service:latest
@@ -55,6 +73,35 @@ spec:
               value: "stderr"            # Send logs to FluentBit
           ports:
             - containerPort: 8000
+          # /up is Laravel's built-in health route. It sits outside the web middleware,
+          # so it needs no session or DB and fails only if the app itself is broken.
+          readinessProbe:
+            httpGet:
+              path: /up
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /up
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5            # artisan serve is single-threaded; allow for a slow request
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
 ---
 apiVersion: v1
 kind: Service
