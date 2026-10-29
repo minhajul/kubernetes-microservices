@@ -1,0 +1,41 @@
+# RustFS: S3-compatible object storage for Loki's chunks and ruler data.
+# One pod with one PVC. In-cluster endpoint (S3 API): http://rustfs-svc.monitoring.svc.cluster.local:9000
+# Web console: port 9001 on the same Service (`make rustfs-open`).
+mode:
+  standalone:
+    enabled: true
+  distributed:
+    enabled: false
+
+# Root credentials come from the rustfs-credentials Secret (keys RUSTFS_ACCESS_KEY and
+# RUSTFS_SECRET_KEY), which `make deploy-infra` and the playbook create before this
+# release. Loki reads the same Secret.
+secret:
+  existingSecret: rustfs-credentials
+
+config:
+  rustfs:
+    # Log to stdout, where Fluent Bit picks it up, instead of a second PVC.
+    obs_log_directory: ""
+
+ingress:
+  enabled: false
+
+storageclass:
+  # Empty: use the cluster's default StorageClass (hostpath on Docker Desktop,
+  # local-path on OrbStack/k3s/kind) instead of the chart's hard-coded local-path.
+  name: ""
+  dataStorageSize: 5Gi
+
+# The chart already runs as non-root with no capabilities. This adds the last
+# setting the namespace's warn=restricted Pod Security level asks for.
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

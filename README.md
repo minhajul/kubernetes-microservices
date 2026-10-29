@@ -1,7 +1,7 @@
 ## Kubernetes Microservices Architecture
 
 A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes**, complete
-with a full observability suite (Loki, Grafana, Fluent Bit).
+with a full observability suite (Prometheus, Alertmanager, Loki on RustFS object storage, Fluent Bit, Grafana).
 
 ### Project Structure
 
@@ -15,13 +15,17 @@ kubernetes-microservices/
 │   └── frontend/                  # Next.js (Client Side Rendering)
 │
 └── infrastructure/                # Infrastructure as Code
-    ├── k8s/                       # Kubernetes Manifests
-    │   └── apps/                  # Application Deployments (Auth, Frontend, MySQL)
-    │
-    └── observability/             # Logging Stack Configuration
-        ├── loki-values.yaml       # Log Aggregation (configured for local filesystem)
-        ├── fluentbit-values.yaml  # Log Collector (DaemonSet)
-        └── grafana-values.yaml    # Visualization Dashboard
+    ├── ansible/
+    │   └── deploy-system-apps.yml # Same observability install as `make deploy-infra`
+    └── k8s/                       # Kubernetes Manifests
+        ├── apps/                  # Application Deployments (Auth, Frontend, MySQL)
+        └── observability/         # Helm values for the monitoring stack
+            ├── kube-prometheus-stack-values.yaml # Prometheus, Alertmanager, alert rules
+            ├── metrics-server-values.yaml        # `kubectl top` and HPA metrics
+            ├── rustfs-values.yaml     # S3-compatible object storage for Loki
+            ├── loki-values.yaml       # Log Aggregation (chunks stored in RustFS)
+            ├── fluentbit-values.yaml  # Log Collector (DaemonSet)
+            └── grafana-values.yaml    # Datasources and dashboards
 ````
 
 ### Prerequisites
@@ -53,6 +57,9 @@ make start
 | **Frontend** | [http://localhost](http://localhost)            | Next.js App (Exposed via LoadBalancer)                   |
 | **Auth API** | `kubectl port-forward svc/auth-service 8000:80` | Internal API. Forward port to access at `localhost:8000` |
 | **Grafana**  | `make grafana-open`                             | Monitoring Dashboard. (User: `admin`)                    |
+| **Prometheus** | `make prometheus-open`                        | Metrics and alert rules at `localhost:9090`              |
+| **Alertmanager** | `make alertmanager-open`                    | Firing alerts at `localhost:9093`                        |
+| **RustFS**   | `make rustfs-open`                              | Object storage console at `localhost:9001` (prints keys) |
 
 ### Daily Development Workflow
 
@@ -105,15 +112,192 @@ kubectl exec deploy/auth-service -- php artisan route:clear
 kubectl exec deploy/auth-service -- composer dump-autoload
 ```
 
-### Observability (Logs)
+### Observability
 
-We use **Fluent Bit** to scrape container logs and send them to **Loki**.
+`make deploy-infra` installs the stack below with Helm. The Ansible playbook
+`infrastructure/ansible/deploy-system-apps.yml` installs the same charts, versions and values. Everything goes into the
+`monitoring` namespace, except metrics-server, which goes into `kube-system`. The values files are in
+`infrastructure/k8s/observability/`.
 
-1. Run `make grafana-open`.
-2. Copy the password displayed in the terminal.
-3. Open [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) and login.
-4. Navigate to **Explore** (Compass Icon) -\> Select **Loki**.
-5. Run query: `{job="fluent-bit"}` to see all logs.
+| Component                                                                         | Helm chart (version)                       | Purpose                                         |
+|:----------------------------------------------------------------------------------|:-------------------------------------------|:------------------------------------------------|
+| Prometheus, Alertmanager, Prometheus Operator, kube-state-metrics, node-exporter | `prometheus-community/kube-prometheus-stack` (92.14.1) | Metrics, alert rules, alert routing |
+| RustFS                                                                            | `rustfs/rustfs` (1.0.4)                    | S3-compatible object storage for Loki           |
+| Loki                                                                              | `grafana/loki` (7.5.0)                     | Log storage (single binary, chunks in RustFS)   |
+| Fluent Bit                                                                        | `fluent/fluent-bit` (0.58.3)               | Ships every container's logs to Loki            |
+| Grafana                                                                           | `grafana/grafana` (10.5.15)                | Dashboards for Prometheus, Loki, Alertmanager   |
+| metrics-server                                                                    | `metrics-server/metrics-server` (3.14.0)   | `kubectl top` and HorizontalPodAutoscalers      |
+
+The stack is sized for a single-node laptop cluster. Prometheus scrapes every 30s and keeps 2 days of data, capped at
+1 GB. That data is on an `emptyDir`, so it resets when the Prometheus pod restarts. Prometheus requests 256 MiB of
+memory (limit 1 GiB), and the other kube-prometheus-stack pods and metrics-server request 64 MiB or less each. Loki's
+memcached caches are disabled, because the chunks cache alone would request about 9.6 GiB.
+
+#### Dashboards
+
+Run `make grafana-open`, which prints the `admin` password, log in at [http://localhost:3000](http://localhost:3000), and
+open **Dashboards → Kubernetes**:
+
+* **Cluster Overview**: node CPU, memory and disk usage, node pressure conditions, pod phases, restarts, CPU and memory
+  per namespace, and firing alerts.
+* **App Pods: CPU and Memory**: CPU and memory per pod and as a fraction of the container's limits, restarts,
+  available vs. desired replicas (which follow the HPA), and a requests/limits table. Pick the namespace at the top
+  (default: `default`).
+* **App Logs: auth-service and frontend**: log volume and error lines per app, and a log panel for each app with a
+  regex search box.
+
+The dashboards are inline JSON in `grafana-values.yaml`. To change one, edit it in Grafana, export it as JSON and paste
+it back there. Prefer that over `gnetId:` dashboards from grafana.com. The chart downloads those in an init container
+that exits on the first failed download, so Grafana itself would not start without internet access.
+
+Container CPU and memory come from the kubelet's `/metrics/resource` endpoint (`metrics_path="/metrics/resource"`).
+Some local clusters, such as OrbStack, expose no `container_*` series on `/metrics/cadvisor`.
+
+#### Logs
+
+Open the **App Logs** dashboard, or go to **Explore** → **Loki**. Fluent Bit labels every stream with `namespace`,
+`app` (the pod's `app` label), `pod`, `container`, `stream` (stdout/stderr) and `job="fluent-bit"`. Each log line is
+the container's own output:
+
+```logql
+{namespace="default", app="auth-service"} |= "ERROR"
+```
+
+`{job="fluent-bit"}` still returns every log line.
+
+#### Log storage (RustFS)
+
+Loki keeps its chunks and ruler data in [RustFS](https://github.com/rustfs/rustfs), an S3-compatible object store. RustFS
+runs as one pod with one 5 GiB PVC (`rustfs-data`) from the official chart in standalone mode. Loki reaches it at
+`http://rustfs-svc.monitoring.svc.cluster.local:9000` over plain HTTP with path-style addressing. The web console is
+on port 9001: `make rustfs-open` prints the keys and forwards it to `localhost:9001`.
+
+* **Credentials**: both RustFS and Loki read the root keys from the Secret `monitoring/rustfs-credentials`
+  (`RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`). `make deploy-infra` and the playbook create it before installing RustFS.
+  The first time, they generate random keys. After that, they keep the existing Secret, unless you pass both
+  variables, which overwrite it:
+
+  ```bash
+  make deploy-infra RUSTFS_ACCESS_KEY=... RUSTFS_SECRET_KEY=...
+  ```
+
+  If you change the keys, restart RustFS and Loki so they read the new ones:
+  `kubectl rollout restart -n monitoring deploy/rustfs statefulset/loki`. Loki receives the keys as environment
+  variables, and `-config.expand-env=true` fills them into its config. So they never appear in a ConfigMap or in
+  `helm get values`.
+* **Buckets**: Loki doesn't create its buckets. A Helm pre-install/pre-upgrade hook Job in the Loki release
+  (`loki-create-buckets`, `extraObjects` in `loki-values.yaml`) creates `loki-chunks` and `loki-ruler` with the AWS
+  CLI if they're missing. It runs before Loki's pods are created or updated, and Helm waits for it. RustFS is
+  installed with `--wait` just before it.
+* **Older filesystem logs**: Loki now has a single schema period on S3. On a cluster that already ran the old
+  filesystem-backed Loki, logs from before the switch stay on Loki's PVC but are no longer queried.
+
+`make clean` uninstalls RustFS but keeps the `rustfs-data` PVC (the chart marks it `helm.sh/resource-policy: keep`) and
+the credentials Secret, so a later `make deploy-infra` finds the same logs. To start from empty storage:
+
+```bash
+kubectl delete -n monitoring pvc/rustfs-data secret/rustfs-credentials
+```
+
+#### Alerting
+
+The alert rules are under `additionalPrometheusRulesMap` in `kube-prometheus-stack-values.yaml`. They run alongside
+the chart's default rules. Defaults for control-plane components that local clusters don't expose (etcd, scheduler,
+controller-manager, kube-proxy) are turned off.
+
+| Alert                           | Fires when                                                                   | Severity |
+|:--------------------------------|:-----------------------------------------------------------------------------|:---------|
+| `PodCrashLooping`               | A container has been in CrashLoopBackOff for 5 minutes                       | warning  |
+| `DeploymentReplicasUnavailable` | A Deployment has had unavailable replicas for 10 minutes                     | warning  |
+| `ContainerCPUNearLimit`         | A container has used over 90% of its CPU limit for 15 minutes                | warning  |
+| `ContainerMemoryNearLimit`      | A container has used over 90% of its memory limit for 5 minutes              | warning  |
+| `NodeDiskPressure`              | A node has reported DiskPressure for 5 minutes                               | critical |
+| `LokiDown`, `FluentBitDown`     | Prometheus has been unable to scrape Loki or a Fluent Bit pod for 5 minutes, or the target is gone | critical |
+
+Firing alerts show on the Cluster Overview dashboard, under Grafana's **Alerting → Alert groups** (choose the
+Alertmanager datasource), and at `make alertmanager-open`. Alertmanager has only a `null` receiver, so it doesn't send
+alerts anywhere.
+
+**Sending alerts to Slack or email.** Keep the webhook URL and the SMTP password in a Secret, not in the values file:
+
+```bash
+kubectl create secret generic alertmanager-notifiers -n monitoring \
+  --from-literal=slack-webhook-url='https://hooks.slack.com/services/...' \
+  --from-literal=smtp-password='...'
+```
+
+Then merge this into the `alertmanager:` block of `kube-prometheus-stack-values.yaml` and run `make deploy-infra`.
+Alertmanager mounts each listed Secret at `/etc/alertmanager/secrets/<name>/`. Here warnings go to Slack, and critical
+alerts go to Slack and email:
+
+```yaml
+alertmanager:
+  config:
+    route:
+      receiver: "null"
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+        - receiver: slack
+          matchers:
+            - severity =~ "warning|critical"
+          continue: true
+        - receiver: email
+          matchers:
+            - severity = "critical"
+    receivers:
+      - name: "null"
+      - name: slack
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-notifiers/slack-webhook-url
+            channel: "#alerts"
+            send_resolved: true
+      - name: email
+        email_configs:
+          - to: oncall@example.com
+            from: alertmanager@example.com
+            smarthost: smtp.example.com:587
+            auth_username: alertmanager@example.com
+            auth_password_file: /etc/alertmanager/secrets/alertmanager-notifiers/smtp-password
+            send_resolved: true
+  alertmanagerSpec:
+    secrets:
+      - alertmanager-notifiers
+```
+
+#### metrics-server
+
+The HPAs and `kubectl top` need the metrics API (`v1beta1.metrics.k8s.io`). Docker Desktop, kind and OrbStack don't
+ship it. k3d, Rancher Desktop and minikube's addon do. `make deploy-metrics-server` runs as part of
+`make deploy-infra`, and the playbook does the same. It installs metrics-server only if the metrics API is missing or
+was installed by this same release, so it never fights a metrics-server the cluster already has.
+
+metrics-server runs with `--kubelet-insecure-tls`, because local kubelets serve their metrics with a self-signed
+certificate. Without the flag every scrape fails and `kubectl top` keeps saying `metrics not available yet`. Don't carry
+the flag over to a real cluster. There, give kubelets serving certificates signed by the cluster CA
+(`serverTLSBootstrap: true`, then approve their CSRs) and drop it. To check it works:
+
+```bash
+kubectl top pods
+```
+
+#### Monitoring the apps
+
+Prometheus selects ServiceMonitors, PodMonitors and PrometheusRules from every namespace, not only from its own Helm
+release. auth-service and frontend don't expose `/metrics` yet. Once they do, add a ServiceMonitor for each app's
+Service, and Prometheus picks it up.
+
+#### Upgrading the charts
+
+Chart versions are pinned twice: the `*_VERSION` variables in the `Makefile` and the `*_version` vars in
+`deploy-system-apps.yml`. Change both together. Helm installs CRDs but never upgrades them. Before you bump
+kube-prometheus-stack across a major version, apply the new prometheus-operator CRDs as its upgrade notes describe.
+The `grafana/grafana` chart is frozen at 10.5.15. It is now maintained in
+[grafana-community/helm-charts](https://github.com/grafana-community/helm-charts).
+
+The `monitoring` namespace is labelled Pod Security `enforce=privileged` (`warn`/`audit=restricted`), because
+node-exporter and Fluent Bit need host access. The warnings `make deploy-infra` prints for them are expected.
 
 ### Troubleshooting
 
@@ -133,5 +317,6 @@ We use **Fluent Bit** to scrape container logs and send them to **Loki**.
 
 ### Cleanup
 
-* **Stop Apps:** `make clean` (Deletes apps, keeps DB/Logs).
-* **Stop Everything:** `make nuke` (Deletes Apps, DB, Logs, and Monitoring stack).
+* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server. Keeps
+  the RustFS data PVC and its credentials Secret; see "Log storage (RustFS)").
+* **Full Prune:** `make prune` (Runs `make clean`, then prunes all unused Docker images, containers, volumes and networks).

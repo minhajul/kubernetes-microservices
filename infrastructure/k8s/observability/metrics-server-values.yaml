@@ -1,0 +1,19 @@
+# metrics-server serves the metrics.k8s.io API behind `kubectl top` and the
+# HorizontalPodAutoscalers. Docker Desktop, kind and OrbStack don't ship one;
+# k3d, Rancher Desktop and minikube do, and `make deploy-metrics-server` skips
+# the install there (see the Makefile).
+
+args:
+  # Local kubelets serve /metrics/resource with a self-signed certificate that
+  # metrics-server can't verify, so every scrape fails and `kubectl top` reports
+  # "metrics not available yet". This skips verification of the kubelet's serving
+  # certificate. Local clusters only: on a real cluster, use kubelet serving
+  # certificates signed by the cluster CA (serverTLSBootstrap) and drop this flag.
+  - --kubelet-insecure-tls
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 128Mi

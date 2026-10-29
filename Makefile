@@ -1,8 +1,18 @@
 # Variables
 OBSERVABILITY_NS := monitoring
+OBSERVABILITY_VALUES := infrastructure/k8s/observability
 NEXT_PUBLIC_API_URL ?= http://localhost:8000
 
-.PHONY: build build-push deploy-infra deploy-apps clean
+# Helm chart versions the values files were validated against.
+# Keep in sync with the *_version vars in infrastructure/ansible/deploy-system-apps.yml.
+KUBE_PROMETHEUS_STACK_VERSION := 92.14.1
+LOKI_VERSION := 7.5.0
+FLUENT_BIT_VERSION := 0.58.3
+GRAFANA_VERSION := 10.5.15
+METRICS_SERVER_VERSION := 3.14.0
+RUSTFS_VERSION := 1.0.4
+
+.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-apps clean grafana-open prometheus-open alertmanager-open rustfs-open
 
 # 1. Build Docker Images Locally
 build:
@@ -21,27 +31,89 @@ build-push:
 	docker push auth-service:latest
 	docker push frontend:latest
 
-# 3. Deploy Observability (Loki, FluentBit, Grafana) via Helm
-deploy-infra:
+# 3. Deploy Observability (metrics-server, Prometheus, RustFS, Loki, FluentBit, Grafana) via Helm
+deploy-infra: deploy-metrics-server deploy-rustfs-secret
 	@echo "Deploying Observability Stack..."
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+	helm repo add rustfs https://charts.rustfs.com
 	helm repo add grafana https://grafana.github.io/helm-charts
 	helm repo add fluent https://fluent.github.io/helm-charts
 	helm repo update
 
-	# Install Loki
+	# Install Prometheus, Alertmanager, kube-state-metrics and node-exporter
+	helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+		--version $(KUBE_PROMETHEUS_STACK_VERSION) \
+		--namespace $(OBSERVABILITY_NS) \
+		-f $(OBSERVABILITY_VALUES)/kube-prometheus-stack-values.yaml
+
+	# Install RustFS (Loki's object storage). --wait: Loki's bucket Job needs it up
+	helm upgrade --install rustfs rustfs/rustfs \
+		--version $(RUSTFS_VERSION) \
+		--namespace $(OBSERVABILITY_NS) \
+		--wait \
+		-f $(OBSERVABILITY_VALUES)/rustfs-values.yaml
+
+	# Install Loki (a pre-install hook Job creates its buckets in RustFS first)
 	helm upgrade --install loki grafana/loki \
-		--namespace $(OBSERVABILITY_NS) --create-namespace \
-		-f infrastructure/k8s/observability/loki-values.yaml
+		--version $(LOKI_VERSION) \
+		--namespace $(OBSERVABILITY_NS) \
+		-f $(OBSERVABILITY_VALUES)/loki-values.yaml
 
 	# Install Fluent Bit
 	helm upgrade --install fluent-bit fluent/fluent-bit \
+		--version $(FLUENT_BIT_VERSION) \
 		--namespace $(OBSERVABILITY_NS) \
-		-f infrastructure/k8s/observability/fluentbit-values.yaml
+		-f $(OBSERVABILITY_VALUES)/fluentbit-values.yaml
 
 	# Install Grafana
 	helm upgrade --install grafana grafana/grafana \
+		--version $(GRAFANA_VERSION) \
 		--namespace $(OBSERVABILITY_NS) \
-		-f infrastructure/k8s/observability/grafana-values.yaml
+		-f $(OBSERVABILITY_VALUES)/grafana-values.yaml
+
+# Namespace: node-exporter and Fluent Bit need host access, so don't enforce baseline
+deploy-monitoring-namespace:
+	kubectl create namespace $(OBSERVABILITY_NS) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl label namespace $(OBSERVABILITY_NS) --overwrite \
+		pod-security.kubernetes.io/enforce=privileged \
+		pod-security.kubernetes.io/warn=restricted \
+		pod-security.kubernetes.io/audit=restricted
+
+# RustFS root credentials, also used by Loki. Pass RUSTFS_ACCESS_KEY and RUSTFS_SECRET_KEY
+# (environment or make variables) to set them. Otherwise an existing Secret is kept, or
+# random keys are generated the first time.
+deploy-rustfs-secret: deploy-monitoring-namespace
+	@if [ -n "$$RUSTFS_ACCESS_KEY$$RUSTFS_SECRET_KEY" ] && { [ -z "$$RUSTFS_ACCESS_KEY" ] || [ -z "$$RUSTFS_SECRET_KEY" ]; }; then \
+		echo "Set both RUSTFS_ACCESS_KEY and RUSTFS_SECRET_KEY, or neither."; exit 1; \
+	elif [ -n "$$RUSTFS_ACCESS_KEY" ]; then \
+		kubectl create secret generic rustfs-credentials -n $(OBSERVABILITY_NS) \
+			--from-literal=RUSTFS_ACCESS_KEY="$$RUSTFS_ACCESS_KEY" \
+			--from-literal=RUSTFS_SECRET_KEY="$$RUSTFS_SECRET_KEY" \
+			--dry-run=client -o yaml | kubectl apply -f -; \
+	elif kubectl get secret rustfs-credentials -n $(OBSERVABILITY_NS) >/dev/null 2>&1; then \
+		echo "Keeping the existing rustfs-credentials Secret."; \
+	else \
+		kubectl create secret generic rustfs-credentials -n $(OBSERVABILITY_NS) \
+			--from-literal=RUSTFS_ACCESS_KEY="$$(openssl rand -hex 10)" \
+			--from-literal=RUSTFS_SECRET_KEY="$$(openssl rand -hex 20)"; \
+	fi
+
+# metrics-server backs `kubectl top` and the HPAs. Some clusters already serve the
+# metrics API (k3d, Rancher Desktop, minikube's addon), and a second metrics-server
+# would fight over the v1beta1.metrics.k8s.io APIService. So install it only when
+# that API is missing or was installed by this same Helm release.
+deploy-metrics-server:
+	@if kubectl get apiservice v1beta1.metrics.k8s.io >/dev/null 2>&1 && \
+		[ "$$(kubectl get apiservice v1beta1.metrics.k8s.io -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}')" != "metrics-server" ]; then \
+		echo "The cluster already serves the metrics API; skipping metrics-server."; \
+	else \
+		helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ && \
+		helm repo update metrics-server && \
+		helm upgrade --install metrics-server metrics-server/metrics-server \
+			--version $(METRICS_SERVER_VERSION) \
+			--namespace kube-system \
+			-f $(OBSERVABILITY_VALUES)/metrics-server-values.yaml; \
+	fi
 
 # 4. Deploy Your Apps (and MySQL)
 deploy-apps:
@@ -61,17 +133,33 @@ grafana-open:
 	@echo "\nOpening Port Forward..."
 	kubectl port-forward svc/grafana -n $(OBSERVABILITY_NS) 3000:80
 
+# 7. Access Prometheus and Alertmanager
+prometheus-open:
+	kubectl port-forward svc/kube-prometheus-stack-prometheus -n $(OBSERVABILITY_NS) 9090:9090
+
+alertmanager-open:
+	kubectl port-forward svc/kube-prometheus-stack-alertmanager -n $(OBSERVABILITY_NS) 9093:9093
+
+# RustFS web console at http://localhost:9001
+rustfs-open:
+	@echo "Access key: $$(kubectl get secret rustfs-credentials -n $(OBSERVABILITY_NS) -o jsonpath='{.data.RUSTFS_ACCESS_KEY}' | base64 --decode)"
+	@echo "Secret key: $$(kubectl get secret rustfs-credentials -n $(OBSERVABILITY_NS) -o jsonpath='{.data.RUSTFS_SECRET_KEY}' | base64 --decode)"
+	kubectl port-forward svc/rustfs-svc -n $(OBSERVABILITY_NS) 9001:9001
+
 clean:
 	@echo "Stopping and deleting Kubernetes resources..."
 	kubectl delete -f infrastructure/k8s/apps/ || true
 	helm uninstall loki -n $(OBSERVABILITY_NS) || true
 	helm uninstall fluent-bit -n $(OBSERVABILITY_NS) || true
 	helm uninstall grafana -n $(OBSERVABILITY_NS) || true
+	helm uninstall kube-prometheus-stack -n $(OBSERVABILITY_NS) || true
+	helm uninstall rustfs -n $(OBSERVABILITY_NS) || true
+	helm uninstall metrics-server -n kube-system || true
 	@echo "Removing Docker images..."
 	docker rmi auth-service:latest frontend:latest || true
 	@echo "Cleanup complete!"
 
-# 7. Full Prune (Images, Containers, Volumes, Networks)
+# 8. Full Prune (Images, Containers, Volumes, Networks)
 prune: clean
 	@echo "Pruning unused Docker resources..."
 	docker system prune -af --volumes
