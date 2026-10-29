@@ -1,17 +1,24 @@
 config:
+  # multiline.parser: docker for dockerd/cri-dockerd nodes (Docker Desktop, OrbStack),
+  # cri for containerd nodes (kind).
   inputs: |
     [INPUT]
         Name              tail
         Path              /var/log/containers/*.log
-        Parser            docker
+        multiline.parser  docker, cri
         Tag               kube.*
         Mem_Buf_Limit     5MB
         Skip_Long_Lines   On
 
+  # Labels come from the chart's default kubernetes filter. They let Grafana
+  # select one app, e.g. {namespace="default", app="auth-service"}. The
+  # kubernetes map is then dropped, so each Loki line is the app's own log line.
   outputs: |
     [OUTPUT]
         Name            loki
         Match           *
         Host            loki.monitoring.svc.cluster.local
         Port            3100
-        Labels          job=fluent-bit
+        Labels          job=fluent-bit, namespace=$kubernetes['namespace_name'], pod=$kubernetes['pod_name'], container=$kubernetes['container_name'], app=$kubernetes['labels']['app'], stream=$stream
+        Remove_Keys     kubernetes, stream, logtag
+        Drop_Single_Key raw

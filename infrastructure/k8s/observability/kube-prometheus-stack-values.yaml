@@ -1,0 +1,239 @@
+# kube-prometheus-stack: Prometheus Operator, Prometheus, Alertmanager,
+# kube-state-metrics and node-exporter, sized for a single-node local cluster.
+
+# Pin resource names so Grafana's datasource URLs don't depend on the release name:
+#   http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+#   http://kube-prometheus-stack-alertmanager.monitoring.svc.cluster.local:9093
+fullnameOverride: kube-prometheus-stack
+
+# The standalone Grafana release (grafana-values.yaml) is the only Grafana.
+grafana:
+  enabled: false
+
+# Docker Desktop, kind and OrbStack/k3s either run these inside one process or bind
+# them to 127.0.0.1, so they can't be scraped. Leaving them on only produces
+# "target down" alerts. Their default rules are skipped along with them.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+kubelet:
+  serviceMonitor:
+    # Some local clusters (OrbStack, and any kubelet with PodAndContainerStatsFromCRI)
+    # expose no container_* series on /metrics/cadvisor. /metrics/resource has container
+    # CPU and memory everywhere, so the dashboards and alerts below read from it
+    # (job="kubelet", metrics_path="/metrics/resource").
+    resource: true
+    resourcePath: /metrics/resource
+    resourceInterval: 30s
+    cAdvisorInterval: 30s
+
+defaultRules:
+  rules:
+    # API server SLO and burn-rate rules are production tooling and the most
+    # expensive recording rules in the chart.
+    kubeApiserverAvailability: false
+    kubeApiserverBurnrate: false
+    kubeApiserverHistogram: false
+    kubeApiserverSlos: false
+    windows: false
+  # Replaced by the alerts in additionalPrometheusRulesMap below.
+  disabled:
+    KubePodCrashLooping: true
+    KubeDeploymentReplicasMismatch: true
+
+additionalPrometheusRulesMap:
+  local-cluster-alerts:
+    groups:
+      - name: workloads
+        rules:
+          - alert: PodCrashLooping
+            expr: |-
+              max_over_time(kube_pod_container_status_waiting_reason{job="kube-state-metrics", reason="CrashLoopBackOff"}[5m]) >= 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: Pod is crash-looping.
+              description: 'Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has been in CrashLoopBackOff for 5 minutes.'
+          - alert: DeploymentReplicasUnavailable
+            expr: |-
+              kube_deployment_status_replicas_unavailable{job="kube-state-metrics"} > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: Deployment has unavailable replicas.
+              description: 'Deployment {{ $labels.namespace }}/{{ $labels.deployment }} has had {{ $value }} unavailable replica(s) for 10 minutes.'
+          - alert: ContainerCPUNearLimit
+            expr: |-
+              (
+                sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{job="kubelet", metrics_path="/metrics/resource"}[5m]))
+              /
+                sum by (namespace, pod, container) (kube_pod_container_resource_limits{job="kube-state-metrics", resource="cpu"})
+              ) > 0.9
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: Container CPU usage is near its limit.
+              description: 'Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} has used {{ $value | humanizePercentage }} of its CPU limit for 15 minutes and is likely being throttled.'
+          - alert: ContainerMemoryNearLimit
+            expr: |-
+              (
+                sum by (namespace, pod, container) (container_memory_working_set_bytes{job="kubelet", metrics_path="/metrics/resource"})
+              /
+                sum by (namespace, pod, container) (kube_pod_container_resource_limits{job="kube-state-metrics", resource="memory"})
+              ) > 0.9
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: Container memory usage is near its limit.
+              description: 'Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit and may be OOM-killed.'
+      - name: nodes
+        rules:
+          - alert: NodeDiskPressure
+            expr: |-
+              kube_node_status_condition{job="kube-state-metrics", condition="DiskPressure", status="true"} == 1
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: Node has disk pressure.
+              description: 'Node {{ $labels.node }} reports DiskPressure. The kubelet is evicting pods and new pods will not be scheduled on it.'
+      - name: logging-pipeline
+        rules:
+          # "or absent(...)" also fires when the target is gone entirely
+          # (release uninstalled, Service renamed), not only when a scrape fails.
+          - alert: LokiDown
+            expr: |-
+              up{job="loki", namespace="monitoring"} == 0
+              or
+              absent(up{job="loki", namespace="monitoring"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: Loki is down.
+              description: 'Prometheus cannot scrape Loki in namespace monitoring. Logs are not being stored.'
+          - alert: FluentBitDown
+            expr: |-
+              up{job="fluent-bit", namespace="monitoring"} == 0
+              or
+              absent(up{job="fluent-bit", namespace="monitoring"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: Fluent Bit is down.
+              description: 'Prometheus cannot scrape Fluent Bit{{ with $labels.pod }} pod {{ . }}{{ end }} in namespace monitoring. Container logs are not reaching Loki.'
+
+alertmanager:
+  # Alerts are visible in the Alertmanager UI and Grafana but go nowhere else.
+  # To send them to Slack or email, see "Alerting" in README.md.
+  config:
+    route:
+      receiver: "null"
+      routes:
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+    receivers:
+      - name: "null"
+  alertmanagerSpec:
+    retention: 24h
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
+
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    retention: 2d
+    retentionSize: 1GB
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+    # Select ServiceMonitors, PodMonitors, Probes, ScrapeConfigs and PrometheusRules
+    # from every namespace and release, not only this one, so app monitors added later
+    # are picked up without touching this file.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+  # Scrape the logging pipeline from here, so the loki and fluent-bit releases don't
+  # depend on the ServiceMonitor CRD and can be installed in any order.
+  additionalServiceMonitors:
+    - name: loki
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: loki
+          app.kubernetes.io/instance: loki
+        # Skips loki-headless and loki-gateway, which the chart labels this way
+        # so the same pods aren't scraped twice.
+        matchExpressions:
+          - key: prometheus.io/service-monitor
+            operator: NotIn
+            values: ["false"]
+      namespaceSelector:
+        matchNames:
+          - monitoring
+      endpoints:
+        - port: http-metrics
+          path: /metrics
+    - name: fluent-bit
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: fluent-bit
+          app.kubernetes.io/instance: fluent-bit
+      namespaceSelector:
+        matchNames:
+          - monitoring
+      endpoints:
+        - port: http
+          path: /api/v2/metrics/prometheus
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+prometheus-node-exporter:
+  # Docker Desktop refuses to start a container whose "/" host mount asks for
+  # HostToContainer (rslave) propagation. None still mounts the host root, so
+  # filesystem metrics keep working.
+  hostRootFsMount:
+    enabled: true
+    mountPropagation: None
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi

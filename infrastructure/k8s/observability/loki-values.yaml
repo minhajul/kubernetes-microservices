@@ -34,3 +34,15 @@ backend:
   replicas: 0
 gateway:
   replicas: 0
+
+# Keep it light for a local cluster: the memcached chunks cache requests ~9.6Gi of
+# memory by default, more than the whole node has, so it would stay Pending.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+# The canary DaemonSet only measures Loki itself, and the helm test needs the canary.
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
