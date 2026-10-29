@@ -13,12 +13,16 @@ config:
   # Labels come from the chart's default kubernetes filter. They let Grafana
   # select one app, e.g. {namespace="default", app="auth-service"}. The
   # kubernetes map is then dropped, so each Loki line is the app's own log line.
+  # Retry_Limit: the default of 1 drops chunks if Loki is down for more than a few
+  # seconds (e.g. while it starts after a fresh deploy). 10 retries with Fluent Bit's
+  # exponential backoff (5s base) ride out a Loki restart.
   outputs: |
     [OUTPUT]
         Name            loki
         Match           *
         Host            loki.monitoring.svc.cluster.local
         Port            3100
+        Retry_Limit     10
         Labels          job=fluent-bit, namespace=$kubernetes['namespace_name'], pod=$kubernetes['pod_name'], container=$kubernetes['container_name'], app=$kubernetes['labels']['app'], stream=$stream
         Remove_Keys     kubernetes, stream, logtag
         Drop_Single_Key raw
