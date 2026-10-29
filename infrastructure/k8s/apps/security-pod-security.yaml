@@ -1,0 +1,23 @@
+# Pod Security Standards for the apps namespace.
+# The app manifests set no namespace, so they land in the kubectl context's
+# namespace, which is "default". Applying this adds the labels to the existing
+# namespace; "kubectl delete -f" cannot remove it (default is protected).
+#
+# enforce=baseline: rejects privileged pods, hostPath/hostNetwork/hostPID,
+#   host ports and added capabilities outside the baseline set.
+# warn/audit=restricted: reports, without rejecting, every gap to the
+#   restricted profile. The official mysql:8.0 image starts as root and drops
+#   to uid 999 with gosu, so restricted (runAsNonRoot, drop ALL) rejects it
+#   unless the pod pins runAsUser 999. Raise enforce to restricted once
+#   "kubectl apply" prints no PodSecurity warnings for this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
