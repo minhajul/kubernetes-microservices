@@ -9,6 +9,7 @@ with a full observability suite (Prometheus, Alertmanager, Loki on RustFS object
 kubernetes-microservices/
 ├── Makefile                       # Command Center (Build & Deploy automation)
 ├── README.md                      # Readme docs
+├── .github/workflows/ci.yml       # CI: tests, lint, image builds (pushed to GHCR from main)
 ├── apps/                          # Source Code
 │   ├── auth-service/              # Laravel API (Authentication & Users)
 │   ├── backend-service/           # Laravel API (Business Logic)
@@ -18,7 +19,8 @@ kubernetes-microservices/
     ├── ansible/
     │   └── deploy-system-apps.yml # Same observability install as `make deploy-infra`
     └── k8s/                       # Kubernetes Manifests
-        ├── apps/                  # Application Deployments (Auth, Frontend, MySQL)
+        ├── apps/                  # Deployments (Auth, Frontend, MySQL), scaling-*.yaml, security-*.yaml
+        ├── optional/vpa/          # Recommendation-only VPA (`make deploy-vpa`)
         └── observability/         # Helm values for the monitoring stack
             ├── kube-prometheus-stack-values.yaml # Prometheus, Alertmanager, alert rules
             ├── metrics-server-values.yaml        # `kubectl top` and HPA metrics
@@ -298,6 +300,35 @@ The `grafana/grafana` chart is frozen at 10.5.15. It is now maintained in
 
 The `monitoring` namespace is labelled Pod Security `enforce=privileged` (`warn`/`audit=restricted`), because
 node-exporter and Fluent Bit need host access. The warnings `make deploy-infra` prints for them are expected.
+
+### Scaling and Security
+
+Besides the three Deployments, `infrastructure/k8s/apps/` holds:
+
+* `scaling-*.yaml`: HPAs (auth-service 2–4 pods, frontend 1–3, both at 70% CPU), PodDisruptionBudgets, and a
+  ResourceQuota and LimitRange for the `default` namespace.
+* `security-*.yaml`: NetworkPolicies, Pod Security labels (`enforce=baseline`, `warn`/`audit=restricted`) and one
+  ServiceAccount per app.
+
+Things to know:
+
+* **The HPAs own the replica count.** The Deployments no longer set `replicas`, so the first `make deploy-apps` over an
+  older deploy briefly drops auth-service to 1 pod until its HPA scales it back to 2.
+* **The `default` namespace has a quota** (requests 2 CPU / 3Gi, limits 8 CPU / 6Gi, 20 pods). Anything else you deploy
+  there counts against it. The LimitRange gives containers that set no `resources` a default.
+* **Draining a single-node cluster stalls.** Once one auth-service pod is evicted it has nowhere to go, so the PDB
+  blocks the second eviction. Use `kubectl drain --disable-eviction`, or delete the PDB first.
+* **NetworkPolicies** deny ingress by default. frontend (3000) and auth-service (8000) accept traffic from anywhere,
+  MySQL (3306) only from auth-service, and the `monitoring` namespace may scrape the apps. The app pods can only reach
+  DNS, plus auth-service → MySQL. They only take effect if the cluster's network plugin enforces NetworkPolicy. To
+  check after `make deploy-apps` (a timeout means enforced, `open` means not):
+
+  ```bash
+  kubectl run np-test --rm -it --restart=Never --image=busybox:1.36 -- nc -zv -w 3 mysql 3306
+  ```
+
+* **VPA (optional):** `make deploy-vpa` installs the VPA recommender and recommendation-only VPAs for the three apps,
+  and `make clean-vpa` removes them. See `infrastructure/k8s/optional/vpa/README.md`.
 
 ### Troubleshooting
 

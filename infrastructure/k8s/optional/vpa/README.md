@@ -10,16 +10,21 @@ clusters without the VPA CRDs.
 
 ### 1. Install the VPA recommender
 
+`make deploy-vpa` does steps 1 and 2, and `make clean-vpa` removes both.
+
 VPA needs metrics-server (installed with the observability stack). Recommendation-only mode
-needs just the recommender and the CRDs, so turn off the updater and the admission webhook:
+needs just the recommender and the CRDs, so turn off the updater and the admission webhook.
+The chart's PDB for the single recommender pod would block node drains, so turn that off too:
 
 ```bash
 helm upgrade --install vpa vertical-pod-autoscaler \
   --repo https://kubernetes.github.io/autoscaler \
+  --version 0.15.0 \
   --namespace kube-system \
   --set updater.enabled=false \
   --set admissionController.enabled=false \
-  --set recommender.replicas=1
+  --set recommender.replicas=1 \
+  --set recommender.podDisruptionBudget.enabled=false
 ```
 
 Alternatively, use `hack/vpa-up.sh` from [kubernetes/autoscaler](https://github.com/kubernetes/autoscaler/tree/master/vertical-pod-autoscaler).

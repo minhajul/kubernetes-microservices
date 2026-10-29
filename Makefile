@@ -12,7 +12,10 @@ GRAFANA_VERSION := 10.5.15
 METRICS_SERVER_VERSION := 3.14.0
 RUSTFS_VERSION := 1.0.4
 
-.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-apps clean grafana-open prometheus-open alertmanager-open rustfs-open
+# Optional VPA recommender (make deploy-vpa). Not part of deploy-infra or the playbook.
+VPA_VERSION := 0.15.0
+
+.PHONY: build build-push deploy-infra deploy-metrics-server deploy-monitoring-namespace deploy-rustfs-secret deploy-apps deploy-vpa clean-vpa clean grafana-open prometheus-open alertmanager-open rustfs-open
 
 # 1. Build Docker Images Locally
 build:
@@ -122,6 +125,26 @@ deploy-apps:
 	# Force restart to pick up new image builds if tags didn't change
 	kubectl rollout restart deployment auth-service frontend
 
+# Optional: VPA in recommendation-only mode (see infrastructure/k8s/optional/vpa/README.md).
+# Only the recommender runs, so VPA never evicts or resizes pods. Its single replica gets
+# no PDB, which would otherwise block node drains. Needs metrics-server (make deploy-infra).
+deploy-vpa:
+	helm repo add autoscaler https://kubernetes.github.io/autoscaler
+	helm repo update autoscaler
+	helm upgrade --install vpa autoscaler/vertical-pod-autoscaler \
+		--version $(VPA_VERSION) \
+		--namespace kube-system \
+		--set updater.enabled=false \
+		--set admissionController.enabled=false \
+		--set recommender.replicas=1 \
+		--set recommender.podDisruptionBudget.enabled=false \
+		--wait
+	kubectl apply -f infrastructure/k8s/optional/vpa/
+
+clean-vpa:
+	kubectl delete -f infrastructure/k8s/optional/vpa/ --ignore-not-found || true
+	helm uninstall vpa -n kube-system || true
+
 # 5. Master Command
 start: build deploy-infra deploy-apps
 	@echo "Done! Frontend should be available at http://localhost"
@@ -149,6 +172,8 @@ rustfs-open:
 clean:
 	@echo "Stopping and deleting Kubernetes resources..."
 	kubectl delete -f infrastructure/k8s/apps/ || true
+	kubectl delete -f infrastructure/k8s/optional/vpa/ --ignore-not-found || true
+	helm uninstall vpa -n kube-system || true
 	helm uninstall loki -n $(OBSERVABILITY_NS) || true
 	helm uninstall fluent-bit -n $(OBSERVABILITY_NS) || true
 	helm uninstall grafana -n $(OBSERVABILITY_NS) || true
