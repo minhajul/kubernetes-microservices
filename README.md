@@ -1,7 +1,7 @@
 ## Kubernetes Microservices Architecture
 
 A cloud-native application stack featuring **Laravel** (Backend), **Next.js** (Frontend), and **Kubernetes**, complete
-with a full observability suite (Prometheus, Alertmanager, Loki, Fluent Bit, Grafana).
+with a full observability suite (Prometheus, Alertmanager, Loki on RustFS object storage, Fluent Bit, Grafana).
 
 ### Project Structure
 
@@ -22,7 +22,8 @@ kubernetes-microservices/
         └── observability/         # Helm values for the monitoring stack
             ├── kube-prometheus-stack-values.yaml # Prometheus, Alertmanager, alert rules
             ├── metrics-server-values.yaml        # `kubectl top` and HPA metrics
-            ├── loki-values.yaml       # Log Aggregation (configured for local filesystem)
+            ├── rustfs-values.yaml     # S3-compatible object storage for Loki
+            ├── loki-values.yaml       # Log Aggregation (chunks stored in RustFS)
             ├── fluentbit-values.yaml  # Log Collector (DaemonSet)
             └── grafana-values.yaml    # Datasources and dashboards
 ````
@@ -58,6 +59,7 @@ make start
 | **Grafana**  | `make grafana-open`                             | Monitoring Dashboard. (User: `admin`)                    |
 | **Prometheus** | `make prometheus-open`                        | Metrics and alert rules at `localhost:9090`              |
 | **Alertmanager** | `make alertmanager-open`                    | Firing alerts at `localhost:9093`                        |
+| **RustFS**   | `make rustfs-open`                              | Object storage console at `localhost:9001` (prints keys) |
 
 ### Daily Development Workflow
 
@@ -120,7 +122,8 @@ kubectl exec deploy/auth-service -- composer dump-autoload
 | Component                                                                         | Helm chart (version)                       | Purpose                                         |
 |:----------------------------------------------------------------------------------|:-------------------------------------------|:------------------------------------------------|
 | Prometheus, Alertmanager, Prometheus Operator, kube-state-metrics, node-exporter | `prometheus-community/kube-prometheus-stack` (92.14.1) | Metrics, alert rules, alert routing |
-| Loki                                                                              | `grafana/loki` (7.5.0)                     | Log storage (single binary, local filesystem)   |
+| RustFS                                                                            | `rustfs/rustfs` (1.0.4)                    | S3-compatible object storage for Loki           |
+| Loki                                                                              | `grafana/loki` (7.5.0)                     | Log storage (single binary, chunks in RustFS)   |
 | Fluent Bit                                                                        | `fluent/fluent-bit` (0.58.3)               | Ships every container's logs to Loki            |
 | Grafana                                                                           | `grafana/grafana` (10.5.15)                | Dashboards for Prometheus, Loki, Alertmanager   |
 | metrics-server                                                                    | `metrics-server/metrics-server` (3.14.0)   | `kubectl top` and HorizontalPodAutoscalers      |
@@ -161,6 +164,40 @@ the container's own output:
 ```
 
 `{job="fluent-bit"}` still returns every log line.
+
+#### Log storage (RustFS)
+
+Loki keeps its chunks and ruler data in [RustFS](https://github.com/rustfs/rustfs), an S3-compatible object store. RustFS
+runs as one pod with one 5 GiB PVC (`rustfs-data`) from the official chart in standalone mode. Loki reaches it at
+`http://rustfs-svc.monitoring.svc.cluster.local:9000` over plain HTTP with path-style addressing. The web console is
+on port 9001: `make rustfs-open` prints the keys and forwards it to `localhost:9001`.
+
+* **Credentials**: both RustFS and Loki read the root keys from the Secret `monitoring/rustfs-credentials`
+  (`RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`). `make deploy-infra` and the playbook create it before installing RustFS.
+  The first time, they generate random keys. After that, they keep the existing Secret, unless you pass both
+  variables, which overwrite it:
+
+  ```bash
+  make deploy-infra RUSTFS_ACCESS_KEY=... RUSTFS_SECRET_KEY=...
+  ```
+
+  If you change the keys, restart RustFS and Loki so they read the new ones:
+  `kubectl rollout restart -n monitoring deploy/rustfs statefulset/loki`. Loki receives the keys as environment
+  variables, and `-config.expand-env=true` fills them into its config. So they never appear in a ConfigMap or in
+  `helm get values`.
+* **Buckets**: Loki doesn't create its buckets. A Helm pre-install/pre-upgrade hook Job in the Loki release
+  (`loki-create-buckets`, `extraObjects` in `loki-values.yaml`) creates `loki-chunks` and `loki-ruler` with the AWS
+  CLI if they're missing. It runs before Loki's pods are created or updated, and Helm waits for it. RustFS is
+  installed with `--wait` just before it.
+* **Older filesystem logs**: Loki now has a single schema period on S3. On a cluster that already ran the old
+  filesystem-backed Loki, logs from before the switch stay on Loki's PVC but are no longer queried.
+
+`make clean` uninstalls RustFS but keeps the `rustfs-data` PVC (the chart marks it `helm.sh/resource-policy: keep`) and
+the credentials Secret, so a later `make deploy-infra` finds the same logs. To start from empty storage:
+
+```bash
+kubectl delete -n monitoring pvc/rustfs-data secret/rustfs-credentials
+```
 
 #### Alerting
 
@@ -280,5 +317,6 @@ node-exporter and Fluent Bit need host access. The warnings `make deploy-infra` 
 
 ### Cleanup
 
-* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server).
+* **Stop Everything:** `make clean` (Deletes the apps and uninstalls the monitoring stack and metrics-server. Keeps
+  the RustFS data PVC and its credentials Secret; see "Log storage (RustFS)").
 * **Full Prune:** `make prune` (Runs `make clean`, then prunes all unused Docker images, containers, volumes and networks).

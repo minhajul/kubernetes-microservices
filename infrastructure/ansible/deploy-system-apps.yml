@@ -13,6 +13,11 @@
     fluent_bit_version: "0.58.3"
     grafana_version: "10.5.15"
     metrics_server_version: "3.14.0"
+    rustfs_version: "1.0.4"
+    # RustFS root credentials, also used by Loki. Export both to set them. Otherwise an
+    # existing Secret is kept, or random keys are generated the first time.
+    rustfs_access_key: "{{ lookup('ansible.builtin.env', 'RUSTFS_ACCESS_KEY') }}"
+    rustfs_secret_key: "{{ lookup('ansible.builtin.env', 'RUSTFS_SECRET_KEY') }}"
 
   tasks:
     # node-exporter and Fluent Bit need host access, so don't enforce baseline
@@ -52,6 +57,35 @@
         values_files:
           - "{{ values_dir }}/metrics-server-values.yaml"
 
+    - name: Check the RustFS credentials from the environment
+      ansible.builtin.fail:
+        msg: Set both RUSTFS_ACCESS_KEY and RUSTFS_SECRET_KEY, or neither.
+      when: (rustfs_access_key | length > 0) != (rustfs_secret_key | length > 0)
+
+    - name: Look up the RustFS credentials Secret
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: rustfs-credentials
+        namespace: monitoring
+      register: rustfs_secret
+      no_log: true
+
+    - name: Create or update the RustFS credentials Secret
+      when: rustfs_access_key | length > 0 or rustfs_secret.resources | length == 0
+      no_log: true
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          type: Opaque
+          metadata:
+            name: rustfs-credentials
+            namespace: monitoring
+          stringData:
+            RUSTFS_ACCESS_KEY: "{{ rustfs_access_key or lookup('ansible.builtin.password', '/dev/null', chars=['digits', 'abcdef'], length=20) }}"
+            RUSTFS_SECRET_KEY: "{{ rustfs_secret_key or lookup('ansible.builtin.password', '/dev/null', chars=['digits', 'abcdef'], length=40) }}"
+
     - name: Deploy kube-prometheus-stack (Prometheus, Alertmanager, kube-state-metrics, node-exporter)
       kubernetes.core.helm:
         name: kube-prometheus-stack
@@ -62,6 +96,19 @@
         values_files:
           - "{{ values_dir }}/kube-prometheus-stack-values.yaml"
 
+    # wait: Loki's bucket Job needs RustFS up
+    - name: Deploy RustFS (Object Storage for Loki)
+      kubernetes.core.helm:
+        name: rustfs
+        chart_ref: rustfs
+        chart_version: "{{ rustfs_version }}"
+        release_namespace: monitoring
+        repo_url: https://charts.rustfs.com
+        wait: true
+        values_files:
+          - "{{ values_dir }}/rustfs-values.yaml"
+
+    # A pre-install hook Job creates Loki's buckets in RustFS before Loki starts
     - name: Deploy Loki (Log Storage)
       kubernetes.core.helm:
         name: loki

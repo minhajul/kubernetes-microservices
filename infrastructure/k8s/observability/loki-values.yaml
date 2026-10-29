@@ -5,13 +5,28 @@ loki:
   commonConfig:
     replication_factor: 1
     path_prefix: /var/loki
+  # Chunks and ruler data go to RustFS (rustfs-values.yaml). The keys are expanded
+  # from the environment at startup (-config.expand-env below), so they never
+  # appear in the rendered ConfigMap.
   storage:
-    type: filesystem
+    type: s3
+    bucketNames:
+      chunks: loki-chunks
+      ruler: loki-ruler
+    s3:
+      endpoint: http://rustfs-svc.monitoring.svc.cluster.local:9000
+      region: us-east-1
+      accessKeyId: ${RUSTFS_ACCESS_KEY}
+      secretAccessKey: ${RUSTFS_SECRET_KEY}
+      s3ForcePathStyle: true
+      insecure: true
+  # One period on S3. Logs that an older install wrote to the filesystem store are
+  # no longer queried (see "Log storage" in README.md).
   schemaConfig:
     configs:
       - from: 2024-04-01
         store: tsdb
-        object_store: filesystem
+        object_store: s3
         schema: v13
         index:
           prefix: index_
@@ -20,6 +35,12 @@ loki:
 # Enable the Single Binary (Monolith) mode
 singleBinary:
   replicas: 1
+  extraArgs:
+    - -config.expand-env=true
+  extraEnvFrom:
+    - secretRef:
+        name: rustfs-credentials
+  # Still needed for the WAL and the TSDB index before it is shipped to RustFS.
   persistence:
     enabled: true
     size: 10Gi
@@ -46,3 +67,78 @@ lokiCanary:
   enabled: false
 test:
   enabled: false
+
+# Loki doesn't create its buckets. This hook Job creates any that are missing
+# before Loki's pods are created or updated, on every install and upgrade.
+# Helm waits for it to finish.
+extraObjects:
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: loki-create-buckets
+      namespace: "{{ .Release.Namespace }}"
+      annotations:
+        helm.sh/hook: pre-install,pre-upgrade
+        helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    spec:
+      backoffLimit: 4
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: create-buckets
+              image: amazon/aws-cli:2.38.6
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  s3() { aws --endpoint-url "$S3_ENDPOINT" s3api "$@"; }
+                  i=0
+                  until s3 list-buckets >/dev/null 2>&1; do
+                    i=$((i + 1))
+                    # After ~3 minutes, try once more with errors shown, and fail if it still can't connect.
+                    if [ "$i" -ge 40 ]; then s3 list-buckets >/dev/null; break; fi
+                    echo "Waiting for RustFS at $S3_ENDPOINT..."; sleep 5
+                  done
+                  for bucket in $BUCKETS; do
+                    if s3 head-bucket --bucket "$bucket" 2>/dev/null; then
+                      echo "Bucket $bucket exists"
+                    else
+                      s3 create-bucket --bucket "$bucket" >/dev/null
+                      echo "Created bucket $bucket"
+                    fi
+                  done
+              env:
+                - name: S3_ENDPOINT
+                  value: "{{ .Values.loki.storage.s3.endpoint }}"
+                - name: BUCKETS
+                  value: "{{ .Values.loki.storage.bucketNames.chunks }} {{ .Values.loki.storage.bucketNames.ruler }}"
+                - name: AWS_DEFAULT_REGION
+                  value: "{{ .Values.loki.storage.s3.region }}"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: RUSTFS_ACCESS_KEY
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: rustfs-credentials
+                      key: RUSTFS_SECRET_KEY
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
