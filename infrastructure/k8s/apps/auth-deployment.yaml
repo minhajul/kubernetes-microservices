@@ -12,6 +12,7 @@ spec:
       labels:
         app: auth-service
     spec:
+      serviceAccountName: auth-service  # Created by security-service-accounts.yaml
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

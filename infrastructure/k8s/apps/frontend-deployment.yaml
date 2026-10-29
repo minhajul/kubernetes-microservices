@@ -12,6 +12,7 @@ spec:
       labels:
         app: frontend
     spec:
+      serviceAccountName: frontend  # Created by security-service-accounts.yaml
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true

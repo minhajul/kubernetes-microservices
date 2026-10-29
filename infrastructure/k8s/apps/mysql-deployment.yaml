@@ -23,6 +23,7 @@ spec:
       labels:
         app: mysql
     spec:
+      serviceAccountName: mysql  # Created by security-service-accounts.yaml
       automountServiceAccountToken: false
       # The official image starts as root only to chown its dirs and then drops to its
       # "mysql" user (999). The image already owns /var/lib/mysql and /var/run/mysqld as
