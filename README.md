@@ -9,7 +9,6 @@ with a full observability suite (Prometheus, Alertmanager, Loki on RustFS object
 kubernetes-microservices/
 ├── Makefile                       # Command Center (Build & Deploy automation)
 ├── README.md                      # Readme docs
-├── .github/workflows/ci.yml       # CI: tests, lint, image builds (pushed to GHCR from main)
 ├── apps/                          # Source Code
 │   ├── auth-service/              # Laravel API (Authentication & Users)
 │   └── frontend/                  # Next.js (Client Side Rendering)
