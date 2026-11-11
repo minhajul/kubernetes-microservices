@@ -22,3 +22,12 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# AI assistant config generated locally by Laravel Boost (php artisan boost:install)
+/.agents
+/.claude
+/.gemini
+/.mcp.json
+/boost.json
+/CLAUDE.md
+/GEMINI.md
