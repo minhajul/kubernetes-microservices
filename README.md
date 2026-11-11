@@ -12,7 +12,6 @@ kubernetes-microservices/
 ├── .github/workflows/ci.yml       # CI: tests, lint, image builds (pushed to GHCR from main)
 ├── apps/                          # Source Code
 │   ├── auth-service/              # Laravel API (Authentication & Users)
-│   ├── backend-service/           # Laravel API (Business Logic)
 │   └── frontend/                  # Next.js (Client Side Rendering)
 │
 └── infrastructure/                # Infrastructure as Code
